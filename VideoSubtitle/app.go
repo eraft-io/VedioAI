@@ -274,12 +274,22 @@ func (a *App) InstallWhisper() map[string]interface{} {
 
 	fmt.Println("步骤 2/5: 安装 ffmpeg...")
 
-	// 2. 安装 ffmpeg
-	cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "conda-forge", "ffmpeg", "-y")
+	// 2. 安装 ffmpeg（强制重新安装确保正确）
+	cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "conda-forge", "ffmpeg", "-y", "--force-reinstall")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Println("ffmpeg 安装可能已存在，继续...")
+		fmt.Printf("ffmpeg 安装警告: %v\n", err)
+	}
+
+	// 2.5 验证 ffmpeg 是否可用
+	fmt.Println("验证 ffmpeg 安装...")
+	ffmpegCheck := exec.Command(condaPath, "run", "-n", "whisper", "which", "ffmpeg")
+	ffmpegPath, err := ffmpegCheck.Output()
+	if err != nil {
+		fmt.Printf("ffmpeg 未找到: %v\n", err)
+	} else {
+		fmt.Printf("ffmpeg 路径: %s\n", strings.TrimSpace(string(ffmpegPath)))
 	}
 
 	fmt.Println("步骤 3/5: 安装 llvmlite 和 numba...")

@@ -91,6 +91,12 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 	// 执行 whisper 命令（使用完整路径）
 	cmd := exec.Command(whisperCmd, whisperArgs...)
 
+	// 设置环境变量，确保 ffmpeg 在 PATH 中
+	whisperBinDir := filepath.Dir(whisperCmd)
+	currentPath := os.Getenv("PATH")
+	newPath := whisperBinDir + ":" + currentPath
+	cmd.Env = append(os.Environ(), "PATH="+newPath)
+
 	// 获取 stderr 用于解析进度
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -101,6 +107,7 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 	}
 
 	fmt.Println("执行命令:", cmd.String())
+	fmt.Println("PATH:", newPath)
 
 	// 启动命令
 	if err := cmd.Start(); err != nil {
