@@ -1,0 +1,156 @@
+#app {
+    height: 100vh;
+    text-align: center;
+}
+
+/* 主内容区域 - 左右布局 */
+.main-content {
+    display: flex;
+    gap: 20px;
+    padding: 0 20px 20px;
+    height: calc(100vh - 200px);
+    min-height: 500px;
+}
+
+/* 视频区域 - 占 2/3 宽度 */
+.video-section {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* 字幕区域 - 占 1/3 宽度 */
+.subtitle-section {
+    flex: 1;
+    min-width: 300px;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.subtitle-section .subtitle-panel {
+    height: 100%;
+    min-height: unset;
+}
+
+/* 实时字幕容器 */
+.live-subtitle-container {
+    margin-top: 16px;
+    padding: 16px 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.live-subtitle {
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.live-subtitle.visible {
+    opacity: 1;
+}
+
+.subtitle-original {
+    font-size: 18px;
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.subtitle-translated {
+    font-size: 16px;
+    line-height: 1.5;
+    color: #666;
+    border-top: 1px dashed #ddd;
+    padding-top: 8px;
+    margin-top: 8px;
+}
+
+/* 应用容器 */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* 头部 */
+.app-header {
+    padding: 20px;
+    border-bottom: 1px solid #e0e0e0;
+    background: #fff;
+}
+
+.app-header h1 {
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    color: #333;
+}
+
+.app-header .subtitle {
+    margin: 0;
+    font-size: 14px;
+    color: #666;
+}
+
+#logo {
+    display: block;
+    width: 50%;
+    height: 50%;
+    margin: auto;
+    padding: 10% 0 0;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-origin: content-box;
+}
+
+.result {
+    height: 20px;
+    line-height: 20px;
+    margin: 1.5rem auto;
+}
+
+.input-box .btn {
+    width: 60px;
+    height: 30px;
+    line-height: 30px;
+    border-radius: 3px;
+    border: none;
+    margin: 0 0 0 20px;
+    padding: 0 8px;
+    cursor: pointer;
+}
+
+.input-box .btn:hover {
+    background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
+    color: #333333;
+}
+
+.input-box .input {
+    border: none;
+    border-radius: 3px;
+    outline: none;
+    height: 30px;
+    line-height: 30px;
+    padding: 0 10px;
+    background-color: rgba(240, 240, 240, 1);
+    -webkit-font-smoothing: antialiased;
+}
+
+.input-box .input:hover {
+    border: none;
+    background-color: rgba(255, 255, 255, 1);
+}
+
+.input-box .input:focus {
+    border: none;
+    background-color: rgba(255, 255, 255, 1);
+}

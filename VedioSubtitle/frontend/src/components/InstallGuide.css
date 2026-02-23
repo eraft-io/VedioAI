@@ -1,0 +1,200 @@
+.install-guide-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.install-guide-modal {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 700px;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.install-guide-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.install-guide-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #d32f2f;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.install-guide-content {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+}
+
+.install-guide-content pre {
+  background: #f5f5f5;
+  padding: 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #333;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
+.install-guide-footer {
+  padding: 20px 24px;
+  border-top: 1px solid #e0e0e0;
+  text-align: center;
+}
+
+.install-guide-footer p {
+  margin: 0 0 12px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #2196f3;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #1976d2;
+}
+
+/* 安装进度样式 */
+.install-progress {
+  margin-bottom: 16px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* 日志窗口样式 */
+.install-log-container {
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 300px;
+  overflow: hidden;
+}
+
+.install-log {
+  height: 100%;
+  max-height: 276px;
+  overflow-y: auto;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d4d4d4;
+}
+
+.log-line {
+  padding: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-empty {
+  color: #666;
+  text-align: center;
+  padding: 40px 0;
+}
+
+/* 滚动条样式 */
+.install-log::-webkit-scrollbar {
+  width: 8px;
+}
+
+.install-log::-webkit-scrollbar-track {
+  background: #2d2d2d;
+  border-radius: 4px;
+}
+
+.install-log::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.install-log::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* 次要按钮 */
+.btn-secondary {
+  background: #f5f5f5;
+  color: #333;
+  margin-right: 12px;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+/* 安装说明 */
+.install-note {
+  color: #666;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+/* 禁用状态 */
+.close-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
