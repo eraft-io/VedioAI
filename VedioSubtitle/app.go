@@ -36,16 +36,11 @@ func (a *App) startup(ctx context.Context) {
 
 // isWhisperInstalled 检查 whisper 是否已安装
 func (a *App) isWhisperInstalled() bool {
-	whisperCmd := a.getWhisperCommandPath()
-	if whisperCmd == "whisper" {
-		// 没有找到特定路径，尝试直接执行
-		_, err := exec.LookPath("whisper")
-		return err == nil
+	condaPath := getCondaPath()
+	if condaPath == "" {
+		return false
 	}
-
-	// 检查文件是否存在
-	_, err := os.Stat(whisperCmd)
-	return err == nil
+	return a.checkWhisperEnvInstalled(condaPath)
 }
 
 // isDockerAvailable 检查 Docker 是否可用
@@ -191,22 +186,31 @@ func (a *App) CheckWhisperStatus() map[string]interface{} {
 		"needInstall": false,
 	}
 
-	// 获取 whisper 命令路径（使用与生成字幕相同的逻辑）
-	whisperCmd := a.getWhisperCommandPath()
-
-	// 检查 whisper 命令
-	cmd := exec.Command(whisperCmd, "--version")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	// 检查 conda 是否可用
+	condaPath := getCondaPath()
+	if condaPath == "" {
 		status["needInstall"] = true
-		status["message"] = "Whisper 未安装"
+		status["message"] = "未找到 conda，请先安装 Anaconda 或 Miniconda"
 		return status
 	}
 
-	// whisper 已安装
-	status["installed"] = true
-	status["version"] = strings.TrimSpace(string(output))
-	status["message"] = "Whisper 已就绪"
+	// 使用统一的检测逻辑
+	if a.checkWhisperEnvInstalled(condaPath) {
+		// 获取版本信息
+		cmd := exec.Command(condaPath, "run", "-n", "whisper", "whisper", "--version")
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			status["installed"] = true
+			status["version"] = strings.TrimSpace(string(output))
+			status["message"] = "Whisper 已就绪"
+		} else {
+			status["installed"] = true
+			status["message"] = "Whisper 已安装"
+		}
+	} else {
+		status["needInstall"] = true
+		status["message"] = "Whisper 未安装"
+	}
 
 	return status
 }
@@ -269,6 +273,57 @@ func getCondaPath() string {
 	return ""
 }
 
+// checkWhisperEnvInstalled 检查 Whisper 环境是否已完全安装
+func (a *App) checkWhisperEnvInstalled(condaPath string) bool {
+	fmt.Printf("[调试] 开始检测 Whisper 环境，conda 路径: %s\n", condaPath)
+
+	// 检查 whisper 环境是否存在
+	cmd := exec.Command(condaPath, "env", "list")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("[调试] conda env list 失败: %v\n", err)
+		return false
+	}
+	if !strings.Contains(string(output), "whisper") {
+		fmt.Printf("[调试] 未找到 whisper 环境\n")
+		return false
+	}
+	fmt.Printf("[调试] whisper 环境存在\n")
+
+	// 检查 whisper 是否可通过 python -m 运行
+	fmt.Printf("[调试] 检测 whisper (通过 python -m whisper)...\n")
+	cmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "whisper", "--version")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("[调试] whisper 检测失败: %v, 输出: %s\n", err, string(output))
+		return false
+	}
+	fmt.Printf("[调试] whisper 可用，版本: %s\n", strings.TrimSpace(string(output)))
+
+	// 检查 ffmpeg 是否已安装
+	fmt.Printf("[调试] 检测 ffmpeg...\n")
+	cmd = exec.Command(condaPath, "run", "-n", "whisper", "ffmpeg", "-version")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("[调试] ffmpeg 检测失败: %v, 输出: %s\n", err, string(output))
+		return false
+	}
+	fmt.Printf("[调试] ffmpeg 已安装\n")
+
+	// 检查 llama-cpp-python 是否已安装
+	fmt.Printf("[调试] 检测 llama-cpp-python...\n")
+	cmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-c", "import llama_cpp")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("[调试] llama-cpp-python 检测失败: %v, 输出: %s\n", err, string(output))
+		return false
+	}
+	fmt.Printf("[调试] llama-cpp-python 已安装\n")
+
+	fmt.Printf("[调试] 所有检测通过！\n")
+	return true
+}
+
 // InstallWhisper 自动安装 Whisper
 func (a *App) InstallWhisper() map[string]interface{} {
 	result := map[string]interface{}{
@@ -299,6 +354,24 @@ func (a *App) InstallWhisper() map[string]interface{} {
 		"message":  fmt.Sprintf("找到 conda: %s", condaPath),
 		"progress": 5,
 	})
+
+	// 检查是否已安装
+	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+		"status":   "running",
+		"message":  "检测现有环境...",
+		"progress": 8,
+	})
+
+	if a.checkWhisperEnvInstalled(condaPath) {
+		runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+			"status":   "completed",
+			"message":  "Whisper 环境已安装，跳过安装步骤",
+			"progress": 100,
+		})
+		result["success"] = true
+		result["message"] = "Whisper 环境已就绪"
+		return result
+	}
 
 	// 先接受 conda Terms of Service
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
@@ -446,14 +519,14 @@ func (a *App) InstallWhisper() map[string]interface{} {
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
 		"status":   "running",
 		"message":  "步骤 7/7: 安装 llama-cpp-python（用于字幕翻译）...",
-		"progress": 95,
+		"progress": 93,
 	})
 	cmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install", "llama-cpp-python", "--no-cache-dir")
 	output, _ = cmd.CombinedOutput()
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
 		"status":   "running",
 		"message":  "llama-cpp-python 安装完成",
-		"progress": 98,
+		"progress": 95,
 	})
 
 	// 完成

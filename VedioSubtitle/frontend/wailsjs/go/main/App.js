@@ -45,3 +45,7 @@ export function SelectVideoFile() {
 export function TranslateSubtitles(arg1) {
   return window['go']['main']['App']['TranslateSubtitles'](arg1);
 }
+
+export function TranslateText(arg1) {
+  return window['go']['main']['App']['TranslateText'](arg1);
+}

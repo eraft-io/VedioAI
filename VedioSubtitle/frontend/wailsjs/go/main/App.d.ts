@@ -23,3 +23,5 @@ export function ParseTime(arg1:string):Promise<number>;
 export function SelectVideoFile():Promise<string>;
 
 export function TranslateSubtitles(arg1:Array<main.SubtitleItem>):Promise<main.TranslateResult>;
+
+export function TranslateText(arg1:string):Promise<Record<string, any>>;

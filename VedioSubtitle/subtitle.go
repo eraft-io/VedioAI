@@ -60,17 +60,25 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		model = "base"
 	}
 
-	// 获取 whisper 命令路径（在 conda 环境中）
-	whisperCmd := getWhisperCommand()
-
 	// 准备路径 - 保存到视频所在目录
 	videoDir := filepath.Dir(videoPath)
 	baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 	jsonPath := filepath.Join(videoDir, baseName+".json")
 	srtPath := filepath.Join(videoDir, baseName+".srt")
 
-	// 构建本地 whisper 命令参数 - 使用 all 生成所有格式
+	// 获取 conda 路径，使用 python -m whisper 运行
+	condaPath := getCondaPath()
+	if condaPath == "" {
+		return SubtitleResult{
+			Success: false,
+			Message: "未找到 conda",
+		}
+	}
+
+	// 构建 whisper 命令参数
 	whisperArgs := []string{
+		"run", "-n", "whisper",
+		"python", "-m", "whisper",
 		videoPath,
 		"--model", model,
 		"--output_format", "all",
@@ -88,14 +96,8 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		Message:  "正在加载 Whisper 模型...",
 	})
 
-	// 执行 whisper 命令（使用完整路径）
-	cmd := exec.Command(whisperCmd, whisperArgs...)
-
-	// 设置环境变量，确保 ffmpeg 在 PATH 中
-	whisperBinDir := filepath.Dir(whisperCmd)
-	currentPath := os.Getenv("PATH")
-	newPath := whisperBinDir + ":" + currentPath
-	cmd.Env = append(os.Environ(), "PATH="+newPath)
+	// 执行 whisper 命令（通过 conda run）
+	cmd := exec.Command(condaPath, whisperArgs...)
 
 	// 获取 stderr 用于解析进度
 	stderr, err := cmd.StderrPipe()
@@ -107,7 +109,6 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 	}
 
 	fmt.Println("执行命令:", cmd.String())
-	fmt.Println("PATH:", newPath)
 
 	// 启动命令
 	if err := cmd.Start(); err != nil {
@@ -268,33 +269,4 @@ func (a *App) ParseTime(timeStr string) float64 {
 		return float64(h*3600 + m*60 + s)
 	}
 	return 0
-}
-
-// getWhisperCommand 获取 whisper 命令的完整路径（与 App.getWhisperCommandPath 保持一致）
-func getWhisperCommand() string {
-	// 首先尝试直接使用 whisper（如果已在 PATH 中）
-	if path, err := exec.LookPath("whisper"); err == nil {
-		return path
-	}
-
-	// 尝试常见 conda 环境路径
-	homeDir, _ := os.UserHomeDir()
-	possiblePaths := []string{
-		"/opt/miniconda3/envs/whisper/bin/whisper",
-		filepath.Join(homeDir, "opt", "miniconda3", "envs", "whisper", "bin", "whisper"),
-		filepath.Join(homeDir, "anaconda3", "envs", "whisper", "bin", "whisper"),
-		filepath.Join(homeDir, "miniconda3", "envs", "whisper", "bin", "whisper"),
-		filepath.Join(homeDir, "opt", "anaconda3", "envs", "whisper", "bin", "whisper"),
-		"/usr/local/anaconda3/envs/whisper/bin/whisper",
-		"/opt/anaconda3/envs/whisper/bin/whisper",
-	}
-
-	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-
-	// 如果都找不到，返回 whisper 让系统尝试查找
-	return "whisper"
 }

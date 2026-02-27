@@ -30,9 +30,18 @@ type TranslateProgress struct {
 
 const (
 	llamaCppVersion = "b4402"
-	modelURL        = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
 	modelFileName   = "qwen2.5-3b-instruct-q4_k_m.gguf"
 )
+
+// getModelURLs 返回模型下载地址列表（按优先级排序）
+func getModelURLs() []string {
+	return []string{
+		// 国内镜像源（优先）
+		"https://hf-mirror.com/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+		// 官方源
+		"https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+	}
+}
 
 // getLlamaCppPythonCmd 获取 llama-cpp-python 命令
 func getLlamaCppPythonCmd() *exec.Cmd {
@@ -140,9 +149,26 @@ func downloadModel(ctx context.Context) error {
 		Message:  "正在下载翻译模型...",
 	})
 
-	// 下载模型
-	if err := downloadFileWithProgress(ctx, modelURL, modelPath); err != nil {
-		return fmt.Errorf("下载模型失败: %v", err)
+	// 尝试多个镜像源下载
+	var lastErr error
+	urls := getModelURLs()
+	for i, url := range urls {
+		if i > 0 {
+			runtime.EventsEmit(ctx, "translate:progress", TranslateProgress{
+				Status:   "processing",
+				Progress: 0,
+				Message:  fmt.Sprintf("镜像源 %d 失败，尝试备用源...", i),
+			})
+		}
+		lastErr = downloadFileWithProgress(ctx, url, modelPath)
+		if lastErr == nil {
+			break
+		}
+		fmt.Printf("下载源 %d 失败: %v\n", i+1, lastErr)
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("下载模型失败: %v", lastErr)
 	}
 
 	runtime.EventsEmit(ctx, "translate:progress", TranslateProgress{
@@ -517,4 +543,43 @@ func (a *App) CheckTranslateStatus() map[string]interface{} {
 		"ready":           isLlamaCppInstalled() && isModelDownloaded(),
 	}
 	return status
+}
+
+// translateTextRealtime 实时翻译单个文本（供 OCR 使用）
+func translateTextRealtime(text string) (string, error) {
+	if text == "" {
+		return "", nil
+	}
+
+	// 检查模型是否已下载
+	if !isModelDownloaded() {
+		return "", fmt.Errorf("翻译模型未下载")
+	}
+
+	modelPath := getModelPath()
+	return translateItem(text, modelPath)
+}
+
+// TranslateText 翻译文本（Wails 绑定）
+func (a *App) TranslateText(text string) map[string]interface{} {
+	result := map[string]interface{}{
+		"success":     false,
+		"message":     "",
+		"translation": "",
+	}
+
+	if text == "" {
+		result["message"] = "文本为空"
+		return result
+	}
+
+	translation, err := translateTextRealtime(text)
+	if err != nil {
+		result["message"] = err.Error()
+		return result
+	}
+
+	result["success"] = true
+	result["translation"] = translation
+	return result
 }

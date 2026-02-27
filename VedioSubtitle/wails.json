@@ -9,5 +9,10 @@
   "author": {
     "name": "Colin",
     "email": "jay_jieliu@outlook.com"
-  }
+  },
+  "info": {
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2024"
+  },
+  "nsisType": "multiple"
 }
