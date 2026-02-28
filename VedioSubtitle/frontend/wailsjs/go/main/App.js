@@ -14,6 +14,10 @@ export function CheckWhisperStatus() {
   return window['go']['main']['App']['CheckWhisperStatus']();
 }
 
+export function ExportSubtitlesToJSON(arg1, arg2) {
+  return window['go']['main']['App']['ExportSubtitlesToJSON'](arg1, arg2);
+}
+
 export function FormatTime(arg1) {
   return window['go']['main']['App']['FormatTime'](arg1);
 }
@@ -30,12 +34,20 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function ImportSubtitleFromJSON(arg1) {
+  return window['go']['main']['App']['ImportSubtitleFromJSON'](arg1);
+}
+
 export function InstallWhisper() {
   return window['go']['main']['App']['InstallWhisper']();
 }
 
 export function ParseTime(arg1) {
   return window['go']['main']['App']['ParseTime'](arg1);
+}
+
+export function SelectSubtitleFile() {
+  return window['go']['main']['App']['SelectSubtitleFile']();
 }
 
 export function SelectVideoFile() {

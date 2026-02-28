@@ -8,6 +8,8 @@ export function CheckTranslateStatus():Promise<Record<string, any>>;
 
 export function CheckWhisperStatus():Promise<Record<string, any>>;
 
+export function ExportSubtitlesToJSON(arg1:Array<main.SubtitleItem>,arg2:string):Promise<main.ExportSubtitleResult>;
+
 export function FormatTime(arg1:number):Promise<string>;
 
 export function GenerateSubtitle(arg1:string,arg2:string,arg3:string):Promise<main.SubtitleResult>;
@@ -16,9 +18,13 @@ export function GetCurrentSubtitle(arg1:Array<main.SubtitleItem>,arg2:number):Pr
 
 export function Greet(arg1:string):Promise<string>;
 
+export function ImportSubtitleFromJSON(arg1:string):Promise<main.ImportSubtitleResult>;
+
 export function InstallWhisper():Promise<Record<string, any>>;
 
 export function ParseTime(arg1:string):Promise<number>;
+
+export function SelectSubtitleFile():Promise<string>;
 
 export function SelectVideoFile():Promise<string>;
 

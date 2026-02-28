@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -209,7 +210,7 @@ func (a *App) CheckWhisperStatus() map[string]interface{} {
 		}
 	} else {
 		status["needInstall"] = true
-		status["message"] = "Whisper 未安装"
+		// status["message"] = "Whisper 未安装"
 	}
 
 	return status
@@ -580,7 +581,148 @@ func (a *App) SelectVideoFile() string {
 	return strings.TrimSpace(string(output))
 }
 
+// SelectSubtitleFile 打开文件选择对话框选择字幕文件
+func (a *App) SelectSubtitleFile() string {
+	cmd := exec.Command("osascript", "-e", `
+		tell application "System Events"
+			activate
+			set subtitleFile to choose file with prompt "选择字幕 JSON 文件" of type {"public.json"}
+			return POSIX path of subtitleFile
+		end tell
+	`)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(output))
+}
+
+// ImportSubtitleResult 导入字幕结果
+type ImportSubtitleResult struct {
+	Success   bool           `json:"success"`
+	Message   string         `json:"message"`
+	Subtitles []SubtitleItem `json:"subtitles"`
+}
+
+// ImportSubtitleFromJSON 从 JSON 文件导入字幕
+func (a *App) ImportSubtitleFromJSON(jsonPath string) ImportSubtitleResult {
+	result := ImportSubtitleResult{
+		Success:   false,
+		Message:   "",
+		Subtitles: []SubtitleItem{},
+	}
+
+	if jsonPath == "" {
+		result.Message = "请选择字幕文件"
+		return result
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
+		result.Message = "字幕文件不存在"
+		return result
+	}
+
+	// 解析 JSON 文件
+	subtitles, err := parseWhisperJSON(jsonPath)
+	if err != nil {
+		result.Message = fmt.Sprintf("解析字幕文件失败: %v", err)
+		return result
+	}
+
+	result.Success = true
+	result.Message = fmt.Sprintf("成功导入 %d 条字幕", len(subtitles))
+	result.Subtitles = subtitles
+
+	return result
+}
+
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
+}
+
+// ExportSubtitleResult 导出字幕结果
+type ExportSubtitleResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Path    string `json:"path"`
+}
+
+// ExportSubtitlesToJSON 将字幕导出为 JSON 文件
+func (a *App) ExportSubtitlesToJSON(subtitles []SubtitleItem, videoPath string) ExportSubtitleResult {
+	result := ExportSubtitleResult{
+		Success: false,
+		Message: "",
+		Path:    "",
+	}
+
+	if len(subtitles) == 0 {
+		result.Message = "没有可导出的字幕"
+		return result
+	}
+
+	// 确定输出路径
+	var outputPath string
+	if videoPath != "" {
+		videoDir := filepath.Dir(videoPath)
+		baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+		outputPath = filepath.Join(videoDir, baseName+"_translated.json")
+	} else {
+		homeDir, _ := os.UserHomeDir()
+		outputPath = filepath.Join(homeDir, "subtitles_translated.json")
+	}
+
+	// 构建 Whisper 格式的 JSON
+	exportData := struct {
+		Segments []struct {
+			ID             int     `json:"id"`
+			Start          float64 `json:"start"`
+			End            float64 `json:"end"`
+			Text           string  `json:"text"`
+			TranslatedText string  `json:"translatedText,omitempty"`
+		} `json:"segments"`
+		Text string `json:"text"`
+	}{
+		Segments: make([]struct {
+			ID             int     `json:"id"`
+			Start          float64 `json:"start"`
+			End            float64 `json:"end"`
+			Text           string  `json:"text"`
+			TranslatedText string  `json:"translatedText,omitempty"`
+		}, len(subtitles)),
+	}
+
+	// 构建完整文本
+	var fullText strings.Builder
+	for i, sub := range subtitles {
+		exportData.Segments[i].ID = sub.ID
+		exportData.Segments[i].Start = sub.StartTime
+		exportData.Segments[i].End = sub.EndTime
+		exportData.Segments[i].Text = sub.Text
+		exportData.Segments[i].TranslatedText = sub.TranslatedText
+		fullText.WriteString(sub.Text)
+		fullText.WriteString(" ")
+	}
+	exportData.Text = strings.TrimSpace(fullText.String())
+
+	// 写入 JSON 文件
+	jsonData, err := json.MarshalIndent(exportData, "", "  ")
+	if err != nil {
+		result.Message = fmt.Sprintf("序列化 JSON 失败: %v", err)
+		return result
+	}
+
+	if err := os.WriteFile(outputPath, jsonData, 0644); err != nil {
+		result.Message = fmt.Sprintf("写入文件失败: %v", err)
+		return result
+	}
+
+	result.Success = true
+	result.Message = fmt.Sprintf("成功导出 %d 条字幕到: %s", len(subtitles), outputPath)
+	result.Path = outputPath
+
+	return result
 }

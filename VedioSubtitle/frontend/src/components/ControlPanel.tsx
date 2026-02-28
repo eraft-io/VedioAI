@@ -15,6 +15,9 @@ interface ControlPanelProps {
   onModelChange: (model: string) => void;
   onLanguageChange: (language: string) => void;
   onShowGuide: () => void;
+  onImportSubtitle?: () => void;
+  onExportSubtitle?: () => void;
+  hasSubtitles?: boolean;
 }
 
 const ControlPanel = ({
@@ -31,7 +34,10 @@ const ControlPanel = ({
   onTranslateSubtitle,
   onModelChange,
   onLanguageChange,
-  onShowGuide
+  onShowGuide,
+  onImportSubtitle,
+  onExportSubtitle,
+  hasSubtitles
 }: ControlPanelProps) => {
   const models = [
     { value: 'tiny', label: 'Tiny (最快, 精度一般)', description: '39M 参数' },
@@ -60,15 +66,7 @@ const ControlPanel = ({
 
   return (
     <div className="control-panel">
-      {!whisperInstalled && (
-        <div className="whisper-warning">
-          <span>⚠️ Whisper 未安装</span>
-          <button className="btn btn-warning" onClick={onShowGuide}>
-            查看安装指南
-          </button>
-        </div>
-      )}
-
+      {/* 第一行：文件选择和配置 */}
       <div className="control-row">
         <div className="control-group file-selection">
           <label>视频文件</label>
@@ -108,10 +106,13 @@ const ControlPanel = ({
             ))}
           </select>
         </div>
+      </div>
 
+      {/* 第二行：操作按钮 */}
+      <div className="control-row actions-row">
         <div className="control-group">
           <label>&nbsp;</label>
-          <button className="btn btn-generate" onClick={onGenerateSubtitle} disabled={!videoPath || isGenerating || !whisperInstalled}>
+          <button className="btn btn-generate" onClick={onGenerateSubtitle} disabled={!videoPath || isGenerating}>
             {isGenerating ? (
               <>
                 <span className="spinner"></span>
@@ -147,6 +148,53 @@ const ControlPanel = ({
                   翻译字幕
                 </>
               )}
+            </button>
+          </div>
+        )}
+
+        {onImportSubtitle && (
+          <div className="control-group">
+            <label>&nbsp;</label>
+            <button className="btn btn-secondary" onClick={onImportSubtitle}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <line x1="9" y1="15" x2="15" y2="15"></line>
+              </svg>
+              导入字幕
+            </button>
+          </div>
+        )}
+
+        {onExportSubtitle && (
+          <div className="control-group">
+            <label>&nbsp;</label>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => {
+                console.log('导出按钮被点击');
+                onExportSubtitle();
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              导出字幕({hasSubtitles ? '有' : '无'}字幕)
+            </button>
+          </div>
+        )}
+
+        {!whisperInstalled && (
+          <div className="control-group">
+            <label>&nbsp;</label>
+            <button className="btn btn-secondary" onClick={onShowGuide}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+              </svg>
+              安装 Whisper
             </button>
           </div>
         )}

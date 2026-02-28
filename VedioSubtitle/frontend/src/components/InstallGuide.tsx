@@ -68,14 +68,15 @@ const InstallGuide = ({ onClose, onRefresh, onInstall }: InstallGuideProps) => {
     <div className="install-guide-overlay">
       <div className="install-guide-modal" style={{ maxWidth: '600px', width: '90%' }}>
         <div className="install-guide-header">
-          <h2>⚠️ Whisper 未安装</h2>
+          <h2>安装 Whisper</h2>
           <button className="close-btn" onClick={onClose} disabled={isInstalling}>×</button>
         </div>
         
         {!isInstalling && status === 'idle' ? (
           <div className="install-guide-content">
-            <p>首次使用需要安装 Whisper，点击下方按钮自动安装</p>
+            <p>Whisper 是生成字幕必需的依赖组件</p>
             <p className="install-note">安装过程可能需要 5-10 分钟，请耐心等待</p>
+            <p className="install-note">您可以选择稍后安装，点击右上角 × 关闭此窗口</p>
           </div>
         ) : (
           <div className="install-guide-content">

@@ -116,10 +116,19 @@ func installLlamaCpp() error {
 
 	fmt.Printf("找到 conda: %s\n", condaPath)
 
-	// 使用 python -m pip 安装
+	// 检测操作系统和硬件
+	homeDir, _ := os.UserHomeDir()
+	
+	// macOS 启用 Metal 支持
 	installCmd := exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
-		"llama-cpp-python", "--no-cache-dir")
-	installCmd.Env = os.Environ()
+		"llama-cpp-python", "--no-cache-dir", "--force-reinstall")
+	
+	// 设置环境变量启用 Metal (macOS)
+	env := os.Environ()
+	env = append(env, "CMAKE_ARGS=-DGGML_METAL=ON")
+	env = append(env, "FORCE_CMAKE=1")
+	installCmd.Env = env
+	
 	output, err := installCmd.CombinedOutput()
 
 	fmt.Printf("安装输出: %s\n", string(output))
@@ -129,6 +138,11 @@ func installLlamaCpp() error {
 	}
 
 	fmt.Println("llama-cpp-python 安装成功")
+	
+	// 创建 Metal 缓存目录（如果不存在）
+	metalCacheDir := filepath.Join(homeDir, ".cache", "llama.cpp")
+	os.MkdirAll(metalCacheDir, 0755)
+	
 	return nil
 }
 
@@ -149,7 +163,17 @@ func downloadModel(ctx context.Context) error {
 		Message:  "正在下载翻译模型...",
 	})
 
-	// 尝试多个镜像源下载
+	// 首先尝试使用 modelscope 命令行工具下载（国内最快）
+	if err := downloadWithModelScope(ctx, modelPath); err == nil {
+		runtime.EventsEmit(ctx, "translate:progress", TranslateProgress{
+			Status:   "processing",
+			Progress: 100,
+			Message:  "模型下载完成",
+		})
+		return nil
+	}
+
+	// 如果 modelscope 失败，尝试 HTTP 下载
 	var lastErr error
 	urls := getModelURLs()
 	for i, url := range urls {
@@ -178,6 +202,101 @@ func downloadModel(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+// downloadWithModelScope 使用 modelscope 命令行工具下载模型
+func downloadWithModelScope(ctx context.Context, modelPath string) error {
+	modelDir := filepath.Dir(modelPath)
+	
+	// 检查 modelscope 是否已安装
+	cmd := exec.Command("modelscope", "--version")
+	if err := cmd.Run(); err != nil {
+		fmt.Println("modelscope 命令未找到，尝试安装...")
+		// 尝试安装 modelscope
+		installCmd := exec.Command("pip", "install", "modelscope")
+		if err := installCmd.Run(); err != nil {
+			return fmt.Errorf("安装 modelscope 失败: %v", err)
+		}
+	}
+
+	fmt.Println("使用 ModelScope 下载模型...")
+	runtime.EventsEmit(ctx, "translate:progress", TranslateProgress{
+		Status:   "processing",
+		Progress: 10,
+		Message:  "使用 ModelScope 下载模型...",
+	})
+
+	// 使用 modelscope 下载模型
+	// modelscope download --model Qwen/Qwen2.5-3B-Instruct-GGUF --include qwen2.5-3b-instruct-q4_k_m.gguf
+	downloadCmd := exec.Command("modelscope", "download", 
+		"--model", "Qwen/Qwen2.5-3B-Instruct-GGUF",
+		"--include", "qwen2.5-3b-instruct-q4_k_m.gguf",
+		"--local_dir", modelDir)
+	
+	// 获取 stdout 和 stderr
+	stdout, _ := downloadCmd.StdoutPipe()
+	stderr, _ := downloadCmd.StderrPipe()
+	
+	if err := downloadCmd.Start(); err != nil {
+		return fmt.Errorf("启动 modelscope 下载失败: %v", err)
+	}
+
+	// 实时读取输出
+	go func() {
+		if stdout != nil {
+			buf := make([]byte, 1024)
+			for {
+				n, err := stdout.Read(buf)
+				if n > 0 {
+					fmt.Printf("[modelscope] %s", string(buf[:n]))
+				}
+				if err != nil {
+					break
+				}
+			}
+		}
+	}()
+	
+	go func() {
+		if stderr != nil {
+			buf := make([]byte, 1024)
+			for {
+				n, err := stderr.Read(buf)
+				if n > 0 {
+					fmt.Printf("[modelscope] %s", string(buf[:n]))
+				}
+				if err != nil {
+					break
+				}
+			}
+		}
+	}()
+
+	if err := downloadCmd.Wait(); err != nil {
+		return fmt.Errorf("modelscope 下载失败: %v", err)
+	}
+
+	// 检查文件是否下载成功
+	// modelscope 会下载到 local_dir/Qwen2.5-3B-Instruct-GGUF/qwen2.5-3b-instruct-q4_k_m.gguf
+	downloadedPath := filepath.Join(modelDir, "Qwen2.5-3B-Instruct-GGUF", "qwen2.5-3b-instruct-q4_k_m.gguf")
+	if _, err := os.Stat(downloadedPath); err == nil {
+		// 移动到目标路径
+		if err := os.Rename(downloadedPath, modelPath); err != nil {
+			return fmt.Errorf("移动模型文件失败: %v", err)
+		}
+		// 清理空目录
+		os.RemoveAll(filepath.Join(modelDir, "Qwen2.5-3B-Instruct-GGUF"))
+		fmt.Println("ModelScope 下载成功")
+		return nil
+	}
+
+	// 检查是否直接下载到了目标路径
+	if _, err := os.Stat(modelPath); err == nil {
+		fmt.Println("ModelScope 下载成功")
+		return nil
+	}
+
+	return fmt.Errorf("模型文件未找到")
 }
 
 // downloadFile 下载文件（带重试）
@@ -431,8 +550,17 @@ if file_size < 1000000:  # 小于1MB可能下载不完整
 try:
     from llama_cpp import Llama
     
-    # 加载模型，使用更小的上下文
-    llm = Llama(model_path=model_path, n_ctx=256, verbose=False)
+    # 加载模型，启用 GPU 加速
+    # n_gpu_layers: 将尽可能多的层加载到 GPU
+    # n_ctx: 上下文长度
+    # n_batch: 批处理大小
+    llm = Llama(
+        model_path=model_path, 
+        n_ctx=256, 
+        verbose=False,
+        n_gpu_layers=-1,  # 自动检测并加载所有层到 GPU
+        n_batch=512       # 增大批处理大小提高吞吐量
+    )
     
     prompt = "Translate the following English text to Chinese. Only return the Chinese translation, no explanation.\n\nEnglish: %s\n\nChinese:"
     

@@ -36,6 +36,7 @@ type ProgressInfo struct {
 	Status   string  `json:"status"`   // 状态: processing, completed, error
 	Progress float64 `json:"progress"` // 进度 0-100
 	Message  string  `json:"message"`  // 提示信息
+	Output   string  `json:"output"`   // 实时输出日志
 }
 
 // GenerateSubtitle 使用本地 Whisper 生成字幕
@@ -75,18 +76,121 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		}
 	}
 
+	// 创建临时 Python 脚本来运行 whisper 并实时打印进度
+	pythonScript := fmt.Sprintf(`
+import whisper
+import sys
+import os
+import json
+
+# 加载模型
+print("[INFO] 正在加载 Whisper 模型: %s", file=sys.stderr)
+model = whisper.load_model("%s")
+
+# 转录音频
+print("[INFO] 开始转录音频...", file=sys.stderr)
+result = model.transcribe("%s", language=%s, verbose=True)
+
+# 实时打印每个片段
+for segment in result["segments"]:
+    start = segment["start"]
+    end = segment["end"]
+    text = segment["text"]
+    print(f"[{start:.3f} --> {end:.3f}] {text}", flush=True)
+
+# 保存 JSON 文件
+json_path = os.path.join("%s", os.path.splitext(os.path.basename("%s"))[0] + ".json")
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(result, f, ensure_ascii=False, indent=2)
+print(f"[INFO] JSON 已保存: {json_path}", file=sys.stderr)
+
+# 保存 SRT 文件
+srt_path = os.path.join("%s", os.path.splitext(os.path.basename("%s"))[0] + ".srt")
+with open(srt_path, "w", encoding="utf-8") as f:
+    for i, segment in enumerate(result["segments"], 1):
+        start = segment["start"]
+        end = segment["end"]
+        text = segment["text"].strip()
+        # 转换为 SRT 时间格式
+        def sec_to_srt(t):
+            h = int(t // 3600)
+            m = int((t %% 3600) // 60)
+            s = int(t %% 60)
+            ms = int((t - int(t)) * 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+        f.write(f"{i}\\n")
+        f.write(f"{sec_to_srt(start)} --> {sec_to_srt(end)}\\n")
+        f.write(f"{text}\\n\\n")
+print(f"[INFO] SRT 已保存: {srt_path}", file=sys.stderr)
+
+print("[INFO] 转录完成", file=sys.stderr)
+`, model, model, videoPath, fmt.Sprintf("\"%s\"", language), videoDir, videoPath, videoDir, videoPath)
+
+	if language == "" || language == "auto" {
+		pythonScript = fmt.Sprintf(`
+import whisper
+import sys
+import os
+import json
+
+# 加载模型
+print("[INFO] 正在加载 Whisper 模型: %s", file=sys.stderr)
+model = whisper.load_model("%s")
+
+# 转录音频（自动检测语言）
+print("[INFO] 开始转录音频...", file=sys.stderr)
+result = model.transcribe("%s", verbose=True)
+
+# 实时打印每个片段
+for segment in result["segments"]:
+    start = segment["start"]
+    end = segment["end"]
+    text = segment["text"]
+    print(f"[{start:.3f} --> {end:.3f}] {text}", flush=True)
+
+# 保存 JSON 文件
+json_path = os.path.join("%s", os.path.splitext(os.path.basename("%s"))[0] + ".json")
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(result, f, ensure_ascii=False, indent=2)
+print(f"[INFO] JSON 已保存: {json_path}", file=sys.stderr)
+
+# 保存 SRT 文件
+srt_path = os.path.join("%s", os.path.splitext(os.path.basename("%s"))[0] + ".srt")
+with open(srt_path, "w", encoding="utf-8") as f:
+    for i, segment in enumerate(result["segments"], 1):
+        start = segment["start"]
+        end = segment["end"]
+        text = segment["text"].strip()
+        # 转换为 SRT 时间格式
+        def sec_to_srt(t):
+            h = int(t // 3600)
+            m = int((t %% 3600) // 60)
+            s = int(t %% 60)
+            ms = int((t - int(t)) * 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+        f.write(f"{i}\\n")
+        f.write(f"{sec_to_srt(start)} --> {sec_to_srt(end)}\\n")
+        f.write(f"{text}\\n\\n")
+print(f"[INFO] SRT 已保存: {srt_path}", file=sys.stderr)
+
+print("[INFO] 转录完成", file=sys.stderr)
+`, model, model, videoPath, videoDir, videoPath, videoDir, videoPath)
+	}
+
+	// 写入临时脚本
+	tmpScript := filepath.Join(videoDir, ".whisper_run.py")
+	if err := os.WriteFile(tmpScript, []byte(pythonScript), 0644); err != nil {
+		return SubtitleResult{
+			Success: false,
+			Message: fmt.Sprintf("创建临时脚本失败: %v", err),
+		}
+	}
+	defer os.Remove(tmpScript)
+
 	// 构建 whisper 命令参数
 	whisperArgs := []string{
 		"run", "-n", "whisper",
-		"python", "-m", "whisper",
-		videoPath,
-		"--model", model,
-		"--output_format", "all",
-		"--output_dir", videoDir,
-	}
-
-	if language != "" && language != "auto" {
-		whisperArgs = append(whisperArgs, "--language", language)
+		"python", tmpScript,
 	}
 
 	// 发送开始事件
@@ -94,17 +198,25 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		Status:   "processing",
 		Progress: 0,
 		Message:  "正在加载 Whisper 模型...",
+		Output:   "",
 	})
 
 	// 执行 whisper 命令（通过 conda run）
 	cmd := exec.Command(condaPath, whisperArgs...)
 
-	// 获取 stderr 用于解析进度
+	// 获取 stdout 和 stderr 用于解析进度
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return SubtitleResult{
+			Success: false,
+			Message: fmt.Sprintf("创建 stdout 管道失败: %v", err),
+		}
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return SubtitleResult{
 			Success: false,
-			Message: fmt.Sprintf("创建管道失败: %v", err),
+			Message: fmt.Sprintf("创建 stderr 管道失败: %v", err),
 		}
 	}
 
@@ -119,45 +231,70 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 	}
 
 	// 解析进度 - 从时间戳估算进度
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		// 匹配时间戳格式 [00:00.000 --> 00:07.000]
-		timestampRegex := regexp.MustCompile(`\[(\d{2}):(\d{2})\.(\d{3}) -->`)
-		var lastProgress float64 = 0
+	var progressMutex = make(chan float64, 1)
+	progressMutex <- 0
+
+	// 处理输出的函数
+	processOutput := func(scanner *bufio.Scanner, source string) {
+		// 匹配时间戳格式 [0.000 --> 7.000] 或 [00:00.000 --> 00:07.000]
+		timestampRegex := regexp.MustCompile(`\[(\d+\.?\d*)\s+-->`)
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			fmt.Println("Whisper:", line)
+			fmt.Printf("Whisper [%s]: %s\n", source, line)
+
+			// 获取当前进度
+			currentProgress := <-progressMutex
+
+			// 发送实时输出到前端
+			runtime.EventsEmit(a.ctx, "subtitle:progress", ProgressInfo{
+				Status:   "processing",
+				Progress: currentProgress,
+				Message:  "正在转录...",
+				Output:   line,
+			})
 
 			// 尝试解析时间戳来估算进度
 			matches := timestampRegex.FindStringSubmatch(line)
-			if len(matches) > 3 {
-				minutes, _ := strconv.Atoi(matches[1])
-				seconds, _ := strconv.Atoi(matches[2])
-				// 估算进度（假设视频约 5 分钟）
-				totalSeconds := minutes*60 + seconds
+			if len(matches) > 1 {
+				seconds, _ := strconv.ParseFloat(matches[1], 64)
+				// 估算进度（假设视频约 5 分钟 = 300 秒）
 				// 使用非线性进度，前期快后期慢
 				var progress float64
-				if totalSeconds < 60 {
-					progress = float64(totalSeconds) * 0.5 // 前1分钟快速到30%
-				} else if totalSeconds < 180 {
-					progress = 30 + float64(totalSeconds-60)*0.4 // 1-3分钟到70%
+				if seconds < 60 {
+					progress = seconds * 0.5 // 前1分钟快速到30%
+				} else if seconds < 180 {
+					progress = 30 + (seconds-60)*0.4 // 1-3分钟到70%
 				} else {
-					progress = 70 + float64(totalSeconds-180)*0.2 // 之后缓慢增长
+					progress = 70 + (seconds-180)*0.1 // 之后缓慢增长
 				}
 				if progress > 95 {
 					progress = 95 // 留5%给最后处理
 				}
-				if progress > lastProgress {
-					lastProgress = progress
+				if progress > currentProgress {
+					currentProgress = progress
 					runtime.EventsEmit(a.ctx, "subtitle:progress", ProgressInfo{
 						Status:   "processing",
 						Progress: progress,
-						Message:  fmt.Sprintf("正在转录... %02d:%02d", minutes, seconds),
+						Message:  fmt.Sprintf("正在转录... %.1fs", seconds),
+						Output:   "",
 					})
 				}
 			}
+
+			// 更新进度
+			progressMutex <- currentProgress
 		}
+	}
+
+	// 同时处理 stdout 和 stderr
+	go func() {
+		stdoutScanner := bufio.NewScanner(stdout)
+		processOutput(stdoutScanner, "stdout")
+	}()
+	go func() {
+		stderrScanner := bufio.NewScanner(stderr)
+		processOutput(stderrScanner, "stderr")
 	}()
 
 	// 等待命令完成
@@ -166,6 +303,7 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 			Status:   "error",
 			Progress: 0,
 			Message:  fmt.Sprintf("转录失败: %v", err),
+			Output:   fmt.Sprintf("错误: %v", err),
 		})
 		return SubtitleResult{
 			Success: false,
@@ -187,6 +325,7 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		Status:   "completed",
 		Progress: 100,
 		Message:  fmt.Sprintf("字幕生成成功！已保存到: %s", srtPath),
+		Output:   "",
 	})
 
 	return SubtitleResult{

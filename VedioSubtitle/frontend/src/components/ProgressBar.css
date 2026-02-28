@@ -54,3 +54,26 @@
   color: #333;
   min-width: 40px;
 }
+
+.progress-log-container {
+  margin-top: 20px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: left;
+}
+
+.progress-log {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line {
+  padding: 2px 0;
+}
