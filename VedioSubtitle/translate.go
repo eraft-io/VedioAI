@@ -555,11 +555,11 @@ try:
     
     # 加载模型，启用 GPU 加速
     # n_gpu_layers: 将尽可能多的层加载到 GPU
-    # n_ctx: 上下文长度
+    # n_ctx: 上下文长度 (2048 支持更长文本翻译)
     # n_batch: 批处理大小
     llm = Llama(
         model_path=model_path, 
-        n_ctx=256, 
+        n_ctx=512,
         verbose=False,
         n_gpu_layers=-1,  # 自动检测并加载所有层到 GPU
         n_batch=512       # 增大批处理大小提高吞吐量
@@ -567,7 +567,7 @@ try:
     
     prompt = "Translate the following English text to Chinese. Only return the Chinese translation, no explanation.\n\nEnglish: %s\n\nChinese:"
     
-    output = llm(prompt, max_tokens=64, temperature=0.1, stop=["\n", "English:"])
+    output = llm(prompt, max_tokens=256, temperature=0.1, stop=["\n", "English:"])
     result = output['choices'][0]['text'].strip()
     
     # 将结果写入文件
@@ -782,6 +782,15 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
 		"status":   "processing",
 		"progress": 60,
+		"message":  "正在聚合字幕...",
+	})
+
+	// 固定每8条字幕聚合（直接使用已翻译的字幕，不再调用LLM翻译）
+	subtitles = mergeSubtitlesBySentenceForHTML(subtitles)
+
+	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
+		"status":   "processing",
+		"progress": 80,
 		"message":  "正在写入文件...",
 	})
 
@@ -812,6 +821,49 @@ type PPTImageInfo struct {
 	Filename  string
 	Path      string
 	Timestamp float64
+}
+
+// mergeSubtitlesBySentenceForHTML 固定每8条字幕合成一条
+func mergeSubtitlesBySentenceForHTML(subtitles []SubtitleItem) []SubtitleItem {
+	if len(subtitles) <= 1 {
+		return subtitles
+	}
+
+	const batchSize = 8 // 每8条合成一条
+
+	var merged []SubtitleItem
+
+	for i := 0; i < len(subtitles); i += batchSize {
+		end := i + batchSize
+		if end > len(subtitles) {
+			end = len(subtitles)
+		}
+
+		// 合并这batchSize条字幕
+		var textParts []string
+		var translatedParts []string
+		startTime := subtitles[i].StartTime
+		endTime := subtitles[end-1].EndTime
+
+		for j := i; j < end; j++ {
+			if subtitles[j].Text != "" {
+				textParts = append(textParts, subtitles[j].Text)
+			}
+			if subtitles[j].TranslatedText != "" {
+				translatedParts = append(translatedParts, subtitles[j].TranslatedText)
+			}
+		}
+
+		merged = append(merged, SubtitleItem{
+			ID:             i / batchSize,
+			StartTime:      startTime,
+			EndTime:        endTime,
+			Text:           strings.Join(textParts, " "),
+			TranslatedText: strings.Join(translatedParts, " "),
+		})
+	}
+
+	return merged
 }
 
 // extractTimestampFromFilename 从文件名提取时间戳

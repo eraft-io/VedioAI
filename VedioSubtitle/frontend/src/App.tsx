@@ -256,44 +256,301 @@ function App() {
 
   // 导入字幕
   const handleImportSubtitle = async () => {
+    console.log('[导入字幕] ========== 开始导入流程 ==========');
+    console.log('[导入字幕] 当前时间:', new Date().toISOString());
+    
+    // 检查浏览器是否支持 File API
+    if (!window.File || !window.FileReader || !window.FileList || !window.Blob) {
+      const errorMsg = '您的浏览器不支持文件操作，请使用现代浏览器（Chrome/Firefox/Safari）';
+      console.error('[导入字幕]', errorMsg);
+      setMessage('❌ ' + errorMsg);
+      return;
+    }
+    console.log('[导入字幕] File API 支持检查通过');
+    
     try {
       // 使用原生文件选择器选择 JSON 文件
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.json';
-      input.onchange = async (e: any) => {
-        const file = e.target.files[0];
-        if (!file) return;
+      input.accept = '.json,application/json';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      
+      console.log('[导入字幕] input 元素已创建并添加到 DOM');
+      
+      // 处理文件选择 - 使用 addEventListener 替代 onchange
+      const handleFileSelect = async (e: Event) => {
+        console.log('[导入字幕] 文件选择事件触发 (addEventListener)');
+        console.log('[导入字幕] 事件对象:', e);
+        
+        const target = e.target as HTMLInputElement;
+        const files = target.files;
+        
+        console.log('[导入字幕] files 对象:', files);
+        console.log('[导入字幕] files.length:', files?.length);
+        
+        if (!files || files.length === 0) {
+          console.log('[导入字幕] 未选择文件或文件列表为空');
+          setMessage('⚠️ 未选择文件');
+          document.body.removeChild(input);
+          return;
+        }
+        
+        const file = files[0];
+        console.log(`[导入字幕] 选择的文件: ${file.name}`);
+        console.log(`[导入字幕] 文件大小: ${file.size} bytes`);
+        console.log(`[导入字幕] 文件类型: ${file.type}`);
+        console.log(`[导入字幕] 文件最后修改: ${new Date(file.lastModified).toISOString()}`);
+        
+        // 检查文件大小（最大 50MB）
+        const maxSize = 50 * 1024 * 1024;
+        if (file.size > maxSize) {
+          const errorMsg = `文件过大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，请上传小于 50MB 的文件`;
+          console.error('[导入字幕]', errorMsg);
+          setMessage('❌ ' + errorMsg);
+          document.body.removeChild(input);
+          return;
+        }
+        
+        // 检查文件扩展名
+        const fileName = file.name.toLowerCase();
+        if (!fileName.endsWith('.json')) {
+          const errorMsg = `文件格式错误：${file.name} 不是 JSON 文件`;
+          console.error('[导入字幕]', errorMsg);
+          setMessage('❌ ' + errorMsg);
+          document.body.removeChild(input);
+          return;
+        }
+        
+        // 检查文件是否为空
+        if (file.size === 0) {
+          const errorMsg = '文件为空，请检查文件内容';
+          console.error('[导入字幕]', errorMsg);
+          setMessage('❌ ' + errorMsg);
+          document.body.removeChild(input);
+          return;
+        }
+        
+        setMessage('📂 正在读取文件...');
         
         const reader = new FileReader();
+        
+        reader.onloadstart = () => {
+          console.log('[导入字幕] FileReader: 开始读取文件');
+        };
+        
         reader.onload = (event) => {
+          console.log('[导入字幕] 文件读取完成');
+          
           try {
-            const jsonData = JSON.parse(event.target?.result as string);
+            const content = event.target?.result as string;
+            
+            if (!content || content.trim() === '') {
+              const errorMsg = '文件内容为空';
+              console.error('[导入字幕]', errorMsg);
+              setMessage('❌ ' + errorMsg);
+              return;
+            }
+            
+            console.log(`[导入字幕] 文件内容长度: ${content.length} 字符`);
+            
+            // 尝试解析 JSON
+            let jsonData: any;
+            try {
+              jsonData = JSON.parse(content);
+            } catch (jsonErr: any) {
+              // JSON 解析失败，尝试修复常见问题
+              console.error('[导入字幕] JSON 解析失败:', jsonErr);
+              
+              // 检查是否是 BOM 问题
+              let cleanedContent = content;
+              if (content.charCodeAt(0) === 0xFEFF) {
+                cleanedContent = content.substring(1);
+                console.log('[导入字幕] 检测到 BOM，已移除');
+              }
+              
+              // 尝试再次解析
+              try {
+                jsonData = JSON.parse(cleanedContent);
+                console.log('[导入字幕] 清理后 JSON 解析成功');
+              } catch (retryErr) {
+                const errorMsg = `JSON 解析失败: ${jsonErr.message || '格式错误'}。请确保文件是有效的 JSON 格式`;
+                console.error('[导入字幕]', errorMsg);
+                setMessage('❌ ' + errorMsg);
+                return;
+              }
+            }
+            
+            console.log('[导入字幕] JSON 解析成功', jsonData);
+            
+            // 检查数据结构
+            if (!jsonData) {
+              const errorMsg = 'JSON 数据为空';
+              console.error('[导入字幕]', errorMsg);
+              setMessage('❌ ' + errorMsg);
+              return;
+            }
+            
             // 解析 Whisper JSON 格式
             if (jsonData.segments && Array.isArray(jsonData.segments)) {
-              const importedSubtitles = jsonData.segments.map((seg: any, index: number) => ({
-                id: seg.id || index,
-                startTime: seg.start,
-                endTime: seg.end,
-                text: seg.text?.trim() || '',
-                translatedText: seg.translatedText || ''
-              }));
+              const segmentCount = jsonData.segments.length;
+              console.log(`[导入字幕] 找到 ${segmentCount} 条字幕段`);
+              
+              if (segmentCount === 0) {
+                const errorMsg = '字幕段数组为空';
+                console.error('[导入字幕]', errorMsg);
+                setMessage('❌ ' + errorMsg);
+                return;
+              }
+              
+              // 验证每条字幕段的数据
+              const invalidSegments = jsonData.segments.filter((seg: any, idx: number) => {
+                if (!seg || typeof seg !== 'object') {
+                  console.error(`[导入字幕] 第 ${idx + 1} 条字幕段格式无效:`, seg);
+                  return true;
+                }
+                if (typeof seg.start !== 'number' || typeof seg.end !== 'number') {
+                  console.error(`[导入字幕] 第 ${idx + 1} 条字幕段时间戳无效:`, seg);
+                  return true;
+                }
+                return false;
+              });
+              
+              if (invalidSegments.length > 0) {
+                const errorMsg = `发现 ${invalidSegments.length} 条格式无效的字幕段`;
+                console.error('[导入字幕]', errorMsg);
+                setMessage('⚠️ ' + errorMsg + '，已跳过无效数据');
+              }
+              
+              const importedSubtitles = jsonData.segments
+                .filter((seg: any) => seg && typeof seg === 'object')
+                .map((seg: any, index: number) => ({
+                  id: seg.id ?? index,
+                  startTime: seg.start ?? 0,
+                  endTime: seg.end ?? 0,
+                  text: String(seg.text || '').trim(),
+                  translatedText: String(seg.translatedText || '').trim()
+                }));
+              
+              console.log(`[导入字幕] 成功解析 ${importedSubtitles.length} 条字幕`);
+              
               setSubtitles(importedSubtitles);
               setSubtitlePath(file.name.replace('.json', '.srt'));
-              setMessage(`成功导入 ${importedSubtitles.length} 条字幕`);
+              setMessage(`✅ 成功导入 ${importedSubtitles.length} 条字幕`);
               setShowTranslateButton(true);
+              
+              console.log('[导入字幕] 字幕状态已更新');
+            } else if (Array.isArray(jsonData)) {
+              // 尝试解析为纯数组格式
+              console.log('[导入字幕] 检测到数组格式，尝试解析');
+              
+              const importedSubtitles = jsonData
+                .filter((seg: any) => seg && typeof seg === 'object')
+                .map((seg: any, index: number) => ({
+                  id: seg.id ?? index,
+                  startTime: seg.start ?? seg.startTime ?? 0,
+                  endTime: seg.end ?? seg.endTime ?? 0,
+                  text: String(seg.text || '').trim(),
+                  translatedText: String(seg.translatedText || seg.translated || '').trim()
+                }));
+              
+              if (importedSubtitles.length > 0) {
+                console.log(`[导入字幕] 成功解析 ${importedSubtitles.length} 条字幕（数组格式）`);
+                setSubtitles(importedSubtitles);
+                setSubtitlePath(file.name.replace('.json', '.srt'));
+                setMessage(`✅ 成功导入 ${importedSubtitles.length} 条字幕`);
+                setShowTranslateButton(true);
+              } else {
+                const errorMsg = '无法从数组中解析出有效字幕数据';
+                console.error('[导入字幕]', errorMsg);
+                setMessage('❌ ' + errorMsg);
+              }
             } else {
-              setMessage('无效的 JSON 格式');
+              const errorMsg = `无效的 JSON 格式：未找到 segments 数组。支持的格式: { "segments": [...] } 或直接数组 [...]`;
+              console.error('[导入字幕]', errorMsg, jsonData);
+              setMessage('❌ ' + errorMsg);
             }
-          } catch (err) {
-            setMessage('解析 JSON 文件失败');
+          } catch (err: any) {
+            console.error('[导入字幕] 处理文件时发生错误:', err);
+            setMessage('❌ 处理文件时发生错误: ' + (err.message || String(err)));
           }
         };
+        
+        reader.onerror = (error) => {
+          console.error('[导入字幕] 文件读取错误:', error);
+          let errorMsg = '文件读取失败';
+          
+          // 尝试获取更详细的错误信息
+          if (reader.error) {
+            const errorCode = (reader.error as any).code;
+            switch (errorCode) {
+              case 1: // NOT_FOUND_ERR
+                errorMsg = '文件未找到';
+                break;
+              case 2: // NOT_READABLE_ERR
+                errorMsg = '文件无法读取（可能没有权限）';
+                break;
+              case 3: // ABORT_ERR
+                errorMsg = '读取操作被中断';
+                break;
+              default:
+                errorMsg = '文件读取错误: ' + reader.error.message;
+            }
+          }
+          
+          setMessage('❌ ' + errorMsg);
+        };
+        
+        reader.onabort = () => {
+          console.log('[导入字幕] 读取操作被用户取消');
+          setMessage('⚠️ 读取操作已取消');
+        };
+        
+        // 设置超时处理
+        const timeoutId = setTimeout(() => {
+          console.error('[导入字幕] 文件读取超时');
+          reader.abort();
+          setMessage('❌ 文件读取超时，请重试');
+        }, 30000); // 30秒超时
+        
+        reader.onloadend = () => {
+          clearTimeout(timeoutId);
+        };
+        
         reader.readAsText(file);
       };
-      input.click();
-    } catch (err) {
-      setMessage('导入字幕失败');
+      
+      // 绑定事件监听器
+      input.addEventListener('change', handleFileSelect);
+      
+      // 处理取消选择的情况
+      input.addEventListener('cancel', () => {
+        console.log('[导入字幕] 用户取消文件选择 (cancel 事件)');
+        setMessage('⚠️ 已取消文件选择');
+        document.body.removeChild(input);
+      });
+      
+      // 点击事件
+      input.addEventListener('click', () => {
+        console.log('[导入字幕] 点击文件选择器 (click 事件)');
+      });
+      
+      // 使用 setTimeout 确保 DOM 更新后再触发点击
+      setTimeout(() => {
+        console.log('[导入字幕] 准备触发文件选择器 click()');
+        try {
+          input.click();
+          console.log('[导入字幕] 文件选择器 click() 已触发');
+        } catch (clickErr) {
+          console.error('[导入字幕] 触发文件选择器失败:', clickErr);
+          setMessage('❌ 无法打开文件选择器');
+          document.body.removeChild(input);
+        }
+      }, 100);
+      
+    } catch (err: any) {
+      console.error('[导入字幕] 导入字幕失败:', err);
+      setMessage('❌ 导入字幕失败: ' + (err.message || String(err)));
     }
   };
 
