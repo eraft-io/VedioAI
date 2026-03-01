@@ -12,7 +12,8 @@ import {
   InstallWhisper,
   TranslateSubtitles,
   ExportSubtitlesToJSON,
-  SummarizeSubtitles
+  SummarizeSubtitles,
+  AnalyzeSubtitlesByContent
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 import { EventsOn } from "../wailsjs/runtime";
@@ -45,6 +46,7 @@ function App() {
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [showTranslateButton, setShowTranslateButton] = useState<boolean>(false);
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
+  const [isExtractingIntelligentPPT, setIsExtractingIntelligentPPT] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -107,12 +109,12 @@ function App() {
     };
   }, []);
 
-  // 监听总结进度事件
+  //监听总结进度事件
   useEffect(() => {
     const unsubscribe = EventsOn("summarize:progress", (data: any) => {
       setProgress(data.progress || 0);
       setProgressMessage(data.message || '');
-      
+        
       if (data.status === 'processing') {
         setShowProgress(true);
       } else if (data.status === 'completed') {
@@ -126,7 +128,32 @@ function App() {
         setMessage(data.message);
       }
     });
-    
+      
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+  
+  // 监听智能PPT提取进度事件
+  useEffect(() => {
+    const unsubscribe = EventsOn("intelligent:progress", (data: any) => {
+      setProgress(data.progress || 0);
+      setProgressMessage(data.message || '');
+        
+      if (data.status === 'processing') {
+        setShowProgress(true);
+      } else if (data.status === 'completed') {
+        setProgress(100);
+        setProgressMessage(data.message || '完成！');
+        setIsExtractingIntelligentPPT(false);
+        setTimeout(() => setShowProgress(false), 3000);
+      } else if (data.status === 'error') {
+        setShowProgress(false);
+        setIsExtractingIntelligentPPT(false);
+        setMessage(data.message);
+      }
+    });
+      
     return () => {
       unsubscribe();
     };
