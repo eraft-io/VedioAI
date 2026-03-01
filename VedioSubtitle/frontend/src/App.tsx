@@ -362,19 +362,19 @@ function App() {
     }
   };
 
-  // 总结字幕内容
+  //总结字幕内容
   const handleSummarizeSubtitle = async () => {
     if (subtitles.length === 0) {
       setMessage('没有字幕可以总结');
       return;
     }
-
+  
     setIsSummarizing(true);
     setMessage('正在生成视频摘要...');
     setShowProgress(true);
     setProgress(0);
     setProgressMessage('正在准备...');
-
+  
     try {
       const summarySubtitles = subtitles.map((sub, index) => ({
         id: sub.id || index,
@@ -383,9 +383,9 @@ function App() {
         text: sub.text,
         translatedText: sub.translatedText || ''
       }));
-
+  
       const result = await SummarizeSubtitles(summarySubtitles as any, videoPath);
-      
+        
       if (result.success) {
         setMessage(`摘要已保存到: ${result.outputPath}`);
       } else {
@@ -396,6 +396,48 @@ function App() {
       setMessage('生成摘要失败: ' + String(err));
     } finally {
       setIsSummarizing(false);
+    }
+  };
+  
+  //智能提取PPT关键帧
+  const handleExtractIntelligentPPT = async () => {
+    if (subtitles.length === 0) {
+      setMessage('请先生成字幕');
+      return;
+    }
+    if (!videoPath) {
+      setMessage('请选择视频文件');
+      return;
+    }
+  
+    setIsExtractingIntelligentPPT(true);
+    setMessage('正在智能分析字幕内容并提取关键帧...');
+    setShowProgress(true);
+    setProgress(0);
+    setProgressMessage('正在分析字幕内容...');
+  
+    try {
+      //字幕格式
+      const subtitleItems = subtitles.map((sub, index) => ({
+        id: sub.id || index,
+        startTime: sub.startTime,
+        endTime: sub.endTime,
+        text: sub.text,
+        translatedText: sub.translatedText || ''
+      }));
+  
+      const result: main.IntelligentPPTResult = await AnalyzeSubtitlesByContent(subtitleItems as any, videoPath);
+        
+      if (result.success) {
+        setMessage(result.message || `成功提取 ${result.frames?.length || 0} 个关键帧`);
+      } else {
+        setMessage(result.message || '智能PPT提取失败');
+        setShowProgress(false);
+      }
+    } catch (err) {
+      setMessage('智能PPT提取时发生错误: ' + String(err));
+      setShowProgress(false);
+      setIsExtractingIntelligentPPT(false);
     }
   };
 
@@ -455,6 +497,7 @@ function App() {
         onImportSubtitle={handleImportSubtitle}
         onExportSubtitle={handleExportSubtitle}
         onSummarizeSubtitle={handleSummarizeSubtitle}
+        onExtractIntelligentPPT={handleExtractIntelligentPPT}
         hasSubtitles={subtitles.length > 0}
       />
 
