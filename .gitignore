@@ -1,5 +1,6 @@
 VedioSubtitle/build/bin/
 VedioSubtitle/build/darwin/arm64
 VedioSubtitle/build/darwin/amd64/
+VedioSubtitle/build/windows/
 VedioSubtitle/frontend/node_modules/
 .DS_Store

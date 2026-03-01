@@ -52,9 +52,15 @@ const VideoPlayer = ({ videoPath, subtitlePath, onTimeUpdate, onPlayStateChange,
 
   const getVideoUrl = (path: string): string => {
     if (!path) return '';
-    // 使用本地文件服务器路径，确保路径以 / 开头
-    const normalizedPath = path.startsWith('/') ? path : '/' + path;
-    return '/local-file' + normalizedPath;
+    // 处理 Windows 路径：将反斜杠转换为正斜杠
+    let normalizedPath = path.replace(/\\/g, '/');
+    // 确保路径以 / 开头（用于 URL）
+    if (!normalizedPath.startsWith('/')) {
+      normalizedPath = '/' + normalizedPath;
+    }
+    // URL 编码路径（保留斜杠和冒号）
+    const encodedPath = normalizedPath.split('/').map(part => encodeURIComponent(part)).join('/');
+    return '/local-file' + encodedPath;
   };
 
   const getSubtitleUrl = (path?: string): string => {

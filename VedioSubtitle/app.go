@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	gos "runtime"
 	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -252,17 +253,34 @@ func getCondaPath() string {
 		return path
 	}
 
-	// 尝试常见的 conda 安装路径
+	// 根据操作系统选择不同的路径
 	homeDir, _ := os.UserHomeDir()
-	possiblePaths := []string{
-		"/opt/miniconda3/bin/conda",
-		"/opt/anaconda3/bin/conda",
-		"/usr/local/miniconda3/bin/conda",
-		"/usr/local/anaconda3/bin/conda",
-		filepath.Join(homeDir, "miniconda3", "bin", "conda"),
-		filepath.Join(homeDir, "anaconda3", "bin", "conda"),
-		filepath.Join(homeDir, "opt", "miniconda3", "bin", "conda"),
-		filepath.Join(homeDir, "opt", "anaconda3", "bin", "conda"),
+	var possiblePaths []string
+
+	if gos.GOOS == "windows" {
+		// Windows 路径
+		possiblePaths = []string{
+			filepath.Join(homeDir, "miniconda3", "Scripts", "conda.exe"),
+			filepath.Join(homeDir, "anaconda3", "Scripts", "conda.exe"),
+			filepath.Join(homeDir, "miniconda3", "condabin", "conda.bat"),
+			filepath.Join(homeDir, "anaconda3", "condabin", "conda.bat"),
+			`C:\ProgramData\miniconda3\Scripts\conda.exe`,
+			`C:\ProgramData\anaconda3\Scripts\conda.exe`,
+			`C:\ProgramData\miniconda3\condabin\conda.bat`,
+			`C:\ProgramData\anaconda3\condabin\conda.bat`,
+		}
+	} else {
+		// macOS/Linux 路径
+		possiblePaths = []string{
+			"/opt/miniconda3/bin/conda",
+			"/opt/anaconda3/bin/conda",
+			"/usr/local/miniconda3/bin/conda",
+			"/usr/local/anaconda3/bin/conda",
+			filepath.Join(homeDir, "miniconda3", "bin", "conda"),
+			filepath.Join(homeDir, "anaconda3", "bin", "conda"),
+			filepath.Join(homeDir, "opt", "miniconda3", "bin", "conda"),
+			filepath.Join(homeDir, "opt", "anaconda3", "bin", "conda"),
+		}
 	}
 
 	for _, path := range possiblePaths {
@@ -341,6 +359,27 @@ func (a *App) InstallWhisper() map[string]interface{} {
 
 	// 检查 conda 是否可用
 	condaPath := getCondaPath()
+
+	// Windows 下如果没有找到 conda，尝试自动下载安装 Miniconda
+	if condaPath == "" && gos.GOOS == "windows" {
+		runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+			"status":   "running",
+			"message":  "未找到 conda，正在自动下载安装 Miniconda...",
+			"progress": 2,
+		})
+
+		minicondaPath, err := a.installMinicondaWindows()
+		if err != nil {
+			result["message"] = fmt.Sprintf("自动安装 Miniconda 失败: %v", err)
+			runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+				"status":  "error",
+				"message": result["message"],
+			})
+			return result
+		}
+		condaPath = minicondaPath
+	}
+
 	if condaPath == "" {
 		result["message"] = "未找到 conda，请先安装 Anaconda 或 Miniconda"
 		runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
@@ -374,14 +413,24 @@ func (a *App) InstallWhisper() map[string]interface{} {
 		return result
 	}
 
-	// 先接受 conda Terms of Service
+	// 先接受 conda Terms of Service（Windows 下需要接受所有可能用到的 channel）
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
 		"status":   "running",
 		"message":  "接受 conda Terms of Service...",
 		"progress": 10,
 	})
-	exec.Command(condaPath, "tos", "accept", "--override-channels", "--channel", "https://repo.anaconda.com/pkgs/main").Run()
-	exec.Command(condaPath, "tos", "accept", "--override-channels", "--channel", "https://repo.anaconda.com/pkgs/r").Run()
+	tosChannels := []string{
+		"https://repo.anaconda.com/pkgs/main",
+		"https://repo.anaconda.com/pkgs/r",
+		"https://repo.anaconda.com/pkgs/msys2",
+		"https://conda.anaconda.org/conda-forge",
+		"https://conda.anaconda.org/pytorch",
+		"https://conda.anaconda.org/nvidia",
+		"https://conda.anaconda.org/huggingface",
+	}
+	for _, channel := range tosChannels {
+		exec.Command(condaPath, "tos", "accept", "--override-channels", "--channel", channel).Run()
+	}
 
 	// 1. 删除旧环境（如果存在）并创建新环境
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
@@ -390,6 +439,21 @@ func (a *App) InstallWhisper() map[string]interface{} {
 		"progress": 15,
 	})
 	exec.Command(condaPath, "remove", "-n", "whisper", "--all", "-y").Run()
+
+	// 如果目录仍然存在（可能是损坏的环境），手动删除
+	condaInfo, _ := exec.Command(condaPath, "info", "--json").Output()
+	var condaInfoData map[string]interface{}
+	if json.Unmarshal(condaInfo, &condaInfoData) == nil {
+		if envsDirs, ok := condaInfoData["envs_dirs"].([]interface{}); ok && len(envsDirs) > 0 {
+			for _, envsDir := range envsDirs {
+				whisperEnvPath := filepath.Join(envsDir.(string), "whisper")
+				if _, err := os.Stat(whisperEnvPath); err == nil {
+					fmt.Printf("[InstallWhisper] 删除损坏的环境目录: %s\n", whisperEnvPath)
+					os.RemoveAll(whisperEnvPath)
+				}
+			}
+		}
+	}
 
 	cmd := exec.Command(condaPath, "create", "-n", "whisper", "python=3.10", "-y")
 	output, err := cmd.CombinedOutput()
@@ -415,7 +479,12 @@ func (a *App) InstallWhisper() map[string]interface{} {
 		"message":  "步骤 2/7: 安装 ffmpeg...",
 		"progress": 30,
 	})
-	cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "conda-forge", "ffmpeg", "-y", "--force-reinstall")
+	// Windows 上 conda-forge 的 ffmpeg 有编码问题，使用默认 channel
+	if gos.GOOS == "windows" {
+		cmd = exec.Command(condaPath, "install", "-n", "whisper", "ffmpeg", "-y")
+	} else {
+		cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "conda-forge", "ffmpeg", "-y", "--force-reinstall")
+	}
 	output, _ = cmd.CombinedOutput()
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
 		"status":   "running",
@@ -476,7 +545,13 @@ func (a *App) InstallWhisper() map[string]interface{} {
 		"message":  "步骤 5/7: 安装 torch...",
 		"progress": 75,
 	})
-	cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "pytorch", "pytorch", "cpuonly", "-y")
+	// Windows 上使用 pip 从 PyTorch 官方源安装，避免 DLL 依赖问题
+	if gos.GOOS == "windows" {
+		cmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
+			"torch", "--index-url", "https://download.pytorch.org/whl/cpu")
+	} else {
+		cmd = exec.Command(condaPath, "install", "-n", "whisper", "-c", "pytorch", "pytorch", "cpuonly", "-y")
+	}
 	output, _ = cmd.CombinedOutput()
 	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
 		"status":   "running",
@@ -565,38 +640,48 @@ func (a *App) BuildWhisperImage() map[string]interface{} {
 
 // SelectVideoFile 打开文件选择对话框选择视频文件
 func (a *App) SelectVideoFile() string {
-	cmd := exec.Command("osascript", "-e", `
-		tell application "System Events"
-			activate
-			set videoFile to choose file with prompt "选择视频文件" of type {"public.movie"}
-			return POSIX path of videoFile
-		end tell
-	`)
-
-	output, err := cmd.Output()
+	// 使用 Wails 跨平台文件对话框
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择视频文件",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "视频文件",
+				Pattern:     "*.mp4;*.mov;*.avi;*.mkv;*.webm;*.flv;*.wmv;*.m4v",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*.*",
+			},
+		},
+	})
 	if err != nil {
+		fmt.Printf("[SelectVideoFile] 错误: %v\n", err)
 		return ""
 	}
-
-	return strings.TrimSpace(string(output))
+	return selection
 }
 
 // SelectSubtitleFile 打开文件选择对话框选择字幕文件
 func (a *App) SelectSubtitleFile() string {
-	cmd := exec.Command("osascript", "-e", `
-		tell application "System Events"
-			activate
-			set subtitleFile to choose file with prompt "选择字幕 JSON 文件" of type {"public.json"}
-			return POSIX path of subtitleFile
-		end tell
-	`)
-
-	output, err := cmd.Output()
+	// 使用 Wails 跨平台文件对话框
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择字幕 JSON 文件",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "JSON 文件",
+				Pattern:     "*.json",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*.*",
+			},
+		},
+	})
 	if err != nil {
+		fmt.Printf("[SelectSubtitleFile] 错误: %v\n", err)
 		return ""
 	}
-
-	return strings.TrimSpace(string(output))
+	return selection
 }
 
 // ImportSubtitleResult 导入字幕结果
@@ -725,4 +810,124 @@ func (a *App) ExportSubtitlesToJSON(subtitles []SubtitleItem, videoPath string) 
 	result.Path = outputPath
 
 	return result
+}
+
+// installMinicondaWindows 在 Windows 上自动下载和安装 Miniconda
+func (a *App) installMinicondaWindows() (string, error) {
+	homeDir, _ := os.UserHomeDir()
+	minicondaInstaller := filepath.Join(homeDir, "miniconda.exe")
+
+	// Windows 下 Miniconda 可能的安装路径
+	possiblePaths := []string{
+		filepath.Join(homeDir, "miniconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "AppData", "Local", "miniconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "anaconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "AppData", "Local", "anaconda3", "Scripts", "conda.exe"),
+		`C:ProgramDataminiconda3Scriptsconda.exe`,
+		`C:ProgramDataanaconda3Scriptsconda.exe`,
+	}
+
+	// 检查是否已安装
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			fmt.Printf("[Miniconda] 已安装在: %s\n", path)
+			return path, nil
+		}
+	}
+
+	fmt.Printf("[Miniconda] 开始下载安装程序...\n")
+	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+		"status":   "running",
+		"message":  "正在下载 Miniconda 安装程序...",
+		"progress": 2,
+	})
+
+	// 使用 PowerShell 下载 Miniconda 安装程序
+	psDownloadCmd := exec.Command("powershell", "-Command",
+		fmt.Sprintf("Invoke-WebRequest -Uri \"%s\" -OutFile \"%s\"",
+			"https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe",
+			minicondaInstaller))
+	psDownloadCmd.Stdout = os.Stdout
+	psDownloadCmd.Stderr = os.Stderr
+
+	if err := psDownloadCmd.Run(); err != nil {
+		return "", fmt.Errorf("下载 Miniconda 失败: %v", err)
+	}
+
+	// 检查下载是否成功
+	if _, err := os.Stat(minicondaInstaller); err != nil {
+		return "", fmt.Errorf("下载文件不存在: %v", err)
+	}
+
+	fmt.Printf("[Miniconda] 下载完成，开始安装...\n")
+	runtime.EventsEmit(a.ctx, "install:progress", map[string]interface{}{
+		"status":   "running",
+		"message":  "正在安装 Miniconda（可能需要几分钟）...",
+		"progress": 3,
+	})
+
+	// 使用 PowerShell 静默安装 Miniconda
+	psInstallCmd := exec.Command("powershell", "-Command",
+		fmt.Sprintf("Start-Process -FilePath \"%s\" -ArgumentList '/S' -Wait",
+			minicondaInstaller))
+	psInstallCmd.Stdout = os.Stdout
+	psInstallCmd.Stderr = os.Stderr
+
+	if err := psInstallCmd.Run(); err != nil {
+		return "", fmt.Errorf("安装 Miniconda 失败: %v", err)
+	}
+
+	// 清理安装程序
+	os.Remove(minicondaInstaller)
+
+	// 验证安装（重新检查所有可能路径）
+	fmt.Printf("[Miniconda] 正在查找 conda.exe...\n")
+	var installedPath string
+	for _, path := range possiblePaths {
+		fmt.Printf("[Miniconda] 检查路径: %s\n", path)
+		if _, err := os.Stat(path); err == nil {
+			fmt.Printf("[Miniconda] 找到: %s\n", path)
+			installedPath = path
+			break
+		} else {
+			fmt.Printf("[Miniconda] 未找到: %v\n", err)
+		}
+	}
+
+	// 如果还是没找到，尝试搜索 homeDir 下的所有可能位置
+	if installedPath == "" {
+		fmt.Printf("[Miniconda] 尝试搜索 homeDir 下的 conda.exe...\n")
+		filepath.Walk(homeDir, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() && info.Name() == "conda.exe" {
+				fmt.Printf("[Miniconda] 搜索发现: %s\n", path)
+				if installedPath == "" {
+					installedPath = path
+				}
+			}
+			return nil
+		})
+	}
+
+	if installedPath == "" {
+		return "", fmt.Errorf("安装后未找到 conda，请检查安装是否成功")
+	}
+
+	fmt.Printf("[Miniconda] 安装成功: %s\n", installedPath)
+
+	// 接受 Conda Terms of Service（Windows 下需要接受所有可能用到的 channel）
+	fmt.Printf("[Miniconda] 接受 Terms of Service...\n")
+	channels := []string{
+		"https://repo.anaconda.com/pkgs/main",
+		"https://repo.anaconda.com/pkgs/r",
+		"https://repo.anaconda.com/pkgs/msys2",
+		"https://conda.anaconda.org/conda-forge",
+		"https://conda.anaconda.org/pytorch",
+		"https://conda.anaconda.org/nvidia",
+		"https://conda.anaconda.org/huggingface",
+	}
+	for _, channel := range channels {
+		exec.Command(installedPath, "tos", "accept", "--override-channels", "--channel", channel).Run()
+	}
+
+	return installedPath, nil
 }

@@ -76,6 +76,10 @@ func (a *App) GenerateSubtitle(videoPath string, model string, language string) 
 		}
 	}
 
+	// Windows 路径转换为 Python 兼容格式（正斜杠）
+	pythonVideoPath := strings.ReplaceAll(videoPath, "\\", "/")
+	pythonVideoDir := strings.ReplaceAll(videoDir, "\\", "/")
+
 	// 创建临时 Python 脚本来运行 whisper 并实时打印进度
 	pythonScript := fmt.Sprintf(`
 import whisper
@@ -124,7 +128,7 @@ with open(srt_path, "w", encoding="utf-8") as f:
 print(f"[INFO] SRT 已保存: {srt_path}", file=sys.stderr)
 
 print("[INFO] 转录完成", file=sys.stderr)
-`, model, model, videoPath, fmt.Sprintf("\"%s\"", language), videoDir, videoPath, videoDir, videoPath)
+`, model, model, pythonVideoPath, fmt.Sprintf("\"%s\"", language), pythonVideoDir, pythonVideoPath, pythonVideoDir, pythonVideoPath)
 
 	if language == "" || language == "auto" {
 		pythonScript = fmt.Sprintf(`
@@ -174,7 +178,7 @@ with open(srt_path, "w", encoding="utf-8") as f:
 print(f"[INFO] SRT 已保存: {srt_path}", file=sys.stderr)
 
 print("[INFO] 转录完成", file=sys.stderr)
-`, model, model, videoPath, videoDir, videoPath, videoDir, videoPath)
+`, model, model, pythonVideoPath, pythonVideoDir, pythonVideoPath, pythonVideoDir, pythonVideoPath)
 	}
 
 	// 写入临时脚本

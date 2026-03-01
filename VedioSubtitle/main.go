@@ -51,10 +51,20 @@ func main() {
 						if err != nil {
 							filePath = encodedPath
 						}
-						// 确保路径以 / 开头
-						if !strings.HasPrefix(filePath, "/") {
+
+						// 处理 Windows 路径（如 C:/Users/... 或 /C:/Users/...）
+						// 移除开头的斜杠（如果后面跟着盘符）
+						if len(filePath) >= 3 && filePath[0] == '/' && filePath[2] == ':' {
+							filePath = filePath[1:] // 移除开头的 /
+						}
+						// 将正斜杠转换为系统路径分隔符（Windows 需要）
+						filePath = strings.ReplaceAll(filePath, "/", string(os.PathSeparator))
+
+						// Unix 系统确保路径以 / 开头
+						if os.PathSeparator == '/' && !strings.HasPrefix(filePath, "/") {
 							filePath = "/" + filePath
 						}
+
 						println("请求视频文件:", filePath)
 
 						// 检查缓存
