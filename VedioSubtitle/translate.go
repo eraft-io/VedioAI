@@ -711,3 +711,244 @@ func (a *App) TranslateText(text string) map[string]interface{} {
 	result["translation"] = translation
 	return result
 }
+
+// SummarizeResult 总结结果
+type SummarizeResult struct {
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	OutputPath string `json:"outputPath"`
+}
+
+// SummarizeSubtitles 导出双语字幕对照 HTML 页面
+func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) SummarizeResult {
+	result := SummarizeResult{
+		Success: false,
+	}
+
+	if len(subtitles) == 0 {
+		result.Message = "没有字幕可以导出"
+		return result
+	}
+
+	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
+		"status":   "processing",
+		"progress": 30,
+		"message":  "正在生成 HTML 页面...",
+	})
+
+	// 确定输出路径
+	var outputPath string
+	if videoPath != "" {
+		videoDir := filepath.Dir(videoPath)
+		baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+		outputPath = filepath.Join(videoDir, baseName+"_bilingual.html")
+	} else {
+		homeDir, _ := os.UserHomeDir()
+		outputPath = filepath.Join(homeDir, "video_bilingual.html")
+	}
+
+	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
+		"status":   "processing",
+		"progress": 60,
+		"message":  "正在写入文件...",
+	})
+
+	// 生成 HTML 内容
+	htmlContent := generateBilingualHTML(videoPath, subtitles)
+
+	// 写入文件
+	if err := os.WriteFile(outputPath, []byte(htmlContent), 0644); err != nil {
+		result.Message = fmt.Sprintf("写入文件失败: %v", err)
+		return result
+	}
+
+	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
+		"status":   "completed",
+		"progress": 100,
+		"message":  "导出完成！",
+	})
+
+	result.Success = true
+	result.Message = fmt.Sprintf("双语字幕已保存到: %s", outputPath)
+	result.OutputPath = outputPath
+
+	return result
+}
+
+// generateBilingualHTML 生成双语字幕对照 HTML 页面
+func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
+	videoName := "Video Bilingual Subtitles"
+	if videoPath != "" {
+		videoName = strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	}
+
+	// 计算时长
+	var duration string
+	if len(subtitles) > 0 {
+		totalSeconds := subtitles[len(subtitles)-1].EndTime
+		minutes := int(totalSeconds) / 60
+		seconds := int(totalSeconds) % 60
+		duration = fmt.Sprintf("%d:%02d", minutes, seconds)
+	}
+
+	var sb strings.Builder
+
+	// HTML 头部
+	sb.WriteString(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>` + videoName + ` - 双语字幕</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 15px;
+        }
+        .stats {
+            display: flex;
+            gap: 30px;
+            color: #666;
+            font-size: 14px;
+        }
+        .stats span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .subtitle-list {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .subtitle-item {
+            padding: 20px 30px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+        .subtitle-item:hover {
+            background: #f8f9ff;
+        }
+        .subtitle-item:last-child {
+            border-bottom: none;
+        }
+        .time-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .english-text {
+            color: #333;
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        .chinese-text {
+            color: #666;
+            font-size: 15px;
+            line-height: 1.6;
+            padding-left: 16px;
+            border-left: 3px solid #667eea;
+        }
+        .no-translation {
+            color: #999;
+            font-style: italic;
+        }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.8);
+            font-size: 13px;
+        }
+        @media (max-width: 600px) {
+            .header h1 {
+                font-size: 22px;
+            }
+            .stats {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .subtitle-item {
+                padding: 15px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📺 ` + videoName + `</h1>
+            <div class="stats">
+                <span>📝 字幕数量: ` + fmt.Sprintf("%d", len(subtitles)) + `</span>
+                <span>⏱️ 时长: ` + duration + `</span>
+                <span>📅 生成时间: ` + time.Now().Format("2006-01-02 15:04:05") + `</span>
+            </div>
+        </div>
+        <div class="subtitle-list">
+`)
+
+	// 字幕内容
+	for i, sub := range subtitles {
+		startMin := int(sub.StartTime) / 60
+		startSec := int(sub.StartTime) % 60
+		endMin := int(sub.EndTime) / 60
+		endSec := int(sub.EndTime) % 60
+		timeStr := fmt.Sprintf("%02d:%02d - %02d:%02d", startMin, startSec, endMin, endSec)
+
+		sb.WriteString(fmt.Sprintf(`            <div class="subtitle-item">
+                <div class="time-badge">#%d | %s</div>
+                <div class="english-text">%s</div>
+`, i+1, timeStr, sub.Text))
+
+		if sub.TranslatedText != "" {
+			sb.WriteString(fmt.Sprintf(`                <div class="chinese-text">%s</div>
+`, sub.TranslatedText))
+		} else {
+			sb.WriteString(`                <div class="chinese-text no-translation">（未翻译）</div>
+`)
+		}
+		sb.WriteString(`            </div>
+`)
+	}
+
+	// HTML 尾部
+	sb.WriteString(`        </div>
+        <div class="footer">
+            Generated by VideoSubtitle | Powered by Whisper & Qwen2.5
+        </div>
+    </div>
+</body>
+</html>
+`)
+
+	return sb.String()
+}

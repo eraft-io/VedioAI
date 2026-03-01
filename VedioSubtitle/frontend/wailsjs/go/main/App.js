@@ -54,6 +54,10 @@ export function SelectVideoFile() {
   return window['go']['main']['App']['SelectVideoFile']();
 }
 
+export function SummarizeSubtitles(arg1, arg2) {
+  return window['go']['main']['App']['SummarizeSubtitles'](arg1, arg2);
+}
+
 export function TranslateSubtitles(arg1) {
   return window['go']['main']['App']['TranslateSubtitles'](arg1);
 }

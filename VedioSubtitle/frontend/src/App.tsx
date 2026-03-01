@@ -11,7 +11,8 @@ import {
   CheckWhisperStatus,
   InstallWhisper,
   TranslateSubtitles,
-  ExportSubtitlesToJSON
+  ExportSubtitlesToJSON,
+  SummarizeSubtitles
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 import { EventsOn } from "../wailsjs/runtime";
@@ -43,6 +44,7 @@ function App() {
   const [progressOutput, setProgressOutput] = useState<string>('');
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [showTranslateButton, setShowTranslateButton] = useState<boolean>(false);
+  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -96,6 +98,31 @@ function App() {
       } else if (data.status === 'error') {
         setShowProgress(false);
         setIsTranslating(false);
+        setMessage(data.message);
+      }
+    });
+    
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // 监听总结进度事件
+  useEffect(() => {
+    const unsubscribe = EventsOn("summarize:progress", (data: any) => {
+      setProgress(data.progress || 0);
+      setProgressMessage(data.message || '');
+      
+      if (data.status === 'processing') {
+        setShowProgress(true);
+      } else if (data.status === 'completed') {
+        setProgress(100);
+        setProgressMessage(data.message || '完成！');
+        setIsSummarizing(false);
+        setTimeout(() => setShowProgress(false), 3000);
+      } else if (data.status === 'error') {
+        setShowProgress(false);
+        setIsSummarizing(false);
         setMessage(data.message);
       }
     });
@@ -308,6 +335,43 @@ function App() {
     }
   };
 
+  // 总结字幕内容
+  const handleSummarizeSubtitle = async () => {
+    if (subtitles.length === 0) {
+      setMessage('没有字幕可以总结');
+      return;
+    }
+
+    setIsSummarizing(true);
+    setMessage('正在生成视频摘要...');
+    setShowProgress(true);
+    setProgress(0);
+    setProgressMessage('正在准备...');
+
+    try {
+      const summarySubtitles = subtitles.map((sub, index) => ({
+        id: sub.id || index,
+        startTime: sub.startTime,
+        endTime: sub.endTime,
+        text: sub.text,
+        translatedText: sub.translatedText || ''
+      }));
+
+      const result = await SummarizeSubtitles(summarySubtitles as any, videoPath);
+      
+      if (result.success) {
+        setMessage(`摘要已保存到: ${result.outputPath}`);
+      } else {
+        setMessage(`生成摘要失败: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('总结失败:', err);
+      setMessage('生成摘要失败: ' + String(err));
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   // 更新当前时间
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time);
@@ -349,6 +413,7 @@ function App() {
         videoPath={videoPath}
         isGenerating={isGenerating}
         isTranslating={isTranslating}
+        isSummarizing={isSummarizing}
         showTranslateButton={showTranslateButton}
         selectedModel={selectedModel}
         selectedLanguage={selectedLanguage}
@@ -362,6 +427,7 @@ function App() {
         onShowGuide={() => setShowGuide(true)}
         onImportSubtitle={handleImportSubtitle}
         onExportSubtitle={handleExportSubtitle}
+        onSummarizeSubtitle={handleSummarizeSubtitle}
         hasSubtitles={subtitles.length > 0}
       />
 

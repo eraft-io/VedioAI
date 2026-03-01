@@ -105,6 +105,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class SummarizeResult {
+	    success: boolean;
+	    message: string;
+	    outputPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SummarizeResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.outputPath = source["outputPath"];
+	    }
+	}
 	export class TranslateResult {
 	    success: boolean;
 	    message: string;

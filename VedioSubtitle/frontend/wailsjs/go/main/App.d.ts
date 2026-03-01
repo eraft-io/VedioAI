@@ -28,6 +28,8 @@ export function SelectSubtitleFile():Promise<string>;
 
 export function SelectVideoFile():Promise<string>;
 
+export function SummarizeSubtitles(arg1:Array<main.SubtitleItem>,arg2:string):Promise<main.SummarizeResult>;
+
 export function TranslateSubtitles(arg1:Array<main.SubtitleItem>):Promise<main.TranslateResult>;
 
 export function TranslateText(arg1:string):Promise<Record<string, any>>;
