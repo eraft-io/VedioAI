@@ -68,6 +68,7 @@ func getCondaPathTranslate() string {
 	// 尝试常见的 conda 安装路径
 	homeDir, _ := os.UserHomeDir()
 	possiblePaths := []string{
+		// macOS/Linux 路径
 		"/opt/miniconda3/bin/conda",
 		"/opt/anaconda3/bin/conda",
 		"/usr/local/miniconda3/bin/conda",
@@ -76,6 +77,15 @@ func getCondaPathTranslate() string {
 		filepath.Join(homeDir, "anaconda3", "bin", "conda"),
 		filepath.Join(homeDir, "opt", "miniconda3", "bin", "conda"),
 		filepath.Join(homeDir, "opt", "anaconda3", "bin", "conda"),
+		// Windows 路径
+		`C:\ProgramData\miniconda3\Scripts\conda.exe`,
+		`C:\ProgramData\anaconda3\Scripts\conda.exe`,
+		`C:\Program Files\miniconda3\Scripts\conda.exe`,
+		`C:\Program Files\anaconda3\Scripts\conda.exe`,
+		filepath.Join(homeDir, "miniconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "anaconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "AppData", "Local", "miniconda3", "Scripts", "conda.exe"),
+		filepath.Join(homeDir, "AppData", "Local", "anaconda3", "Scripts", "conda.exe"),
 	}
 
 	for _, path := range possiblePaths {
@@ -119,17 +129,45 @@ func installLlamaCpp() error {
 
 	fmt.Printf("找到 conda: %s\n", condaPath)
 
-	// 检测操作系统和硬件
-	homeDir, _ := os.UserHomeDir()
+	// 检测操作系统
+	goos := os.Getenv("GOOS")
+	if goos == "" {
+		goos = getGoos()
+	}
+	fmt.Printf("检测到操作系统: %s\n", goos)
 
-	// macOS 启用 Metal 支持
-	installCmd := exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
-		"llama-cpp-python", "--no-cache-dir", "--force-reinstall")
+	// 构建安装命令
+	// Windows 优先尝试仅使用预编译 wheel，避免本地编译
+	var installCmd *exec.Cmd
+	if goos == "windows" {
+		// 先尝试只使用二进制 wheel（避免编译）
+		installCmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
+			"llama-cpp-python", "--no-cache-dir", "--force-reinstall", "--only-binary", ":all:")
+	} else {
+		installCmd = exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
+			"llama-cpp-python", "--no-cache-dir", "--force-reinstall")
+	}
 
-	// 设置环境变量启用 Metal (macOS)
+	// 设置环境变量
 	env := os.Environ()
-	env = append(env, "CMAKE_ARGS=-DGGML_METAL=ON")
-	env = append(env, "FORCE_CMAKE=1")
+
+	// 根据不同操作系统设置编译参数
+	if goos == "darwin" {
+		// macOS 启用 Metal 支持
+		env = append(env, "CMAKE_ARGS=-DGGML_METAL=ON")
+		env = append(env, "FORCE_CMAKE=1")
+		fmt.Println("macOS 平台：启用 Metal 加速")
+	} else if goos == "windows" {
+		// Windows 平台：使用预编译 wheel，避免本地编译
+		// 优先尝试使用预编译版本，如果失败则需要安装 Visual C++ Build Tools
+		fmt.Println("Windows 平台：尝试安装预编译版本...")
+		// 不设置 CMAKE_ARGS，让 pip 尝试找到预编译 wheel
+	} else {
+		// Linux 平台
+		env = append(env, "CMAKE_ARGS=-DLLAMA_OPENBLAS=ON")
+		fmt.Println("Linux 平台：启用 OpenBLAS")
+	}
+
 	installCmd.Env = env
 
 	output, err := installCmd.CombinedOutput()
@@ -137,16 +175,74 @@ func installLlamaCpp() error {
 	fmt.Printf("安装输出: %s\n", string(output))
 
 	if err != nil {
-		return fmt.Errorf("安装 llama-cpp-python 失败: %v", err)
+		// Windows 下如果预编译版本安装失败，尝试安装特定旧版本（通常有更多预编译包）
+		if goos == "windows" && strings.Contains(string(output), "Failed to build") {
+			fmt.Println("最新版无预编译包，尝试安装兼容版本...")
+			return installLlamaCppWindowsFallback(condaPath)
+		}
+		return fmt.Errorf("安装 llama-cpp-python 失败: %v\n输出: %s", err, string(output))
 	}
 
 	fmt.Println("llama-cpp-python 安装成功")
 
-	// 创建 Metal 缓存目录（如果不存在）
-	metalCacheDir := filepath.Join(homeDir, ".cache", "llama.cpp")
-	os.MkdirAll(metalCacheDir, 0755)
+	// 创建缓存目录（如果不存在）
+	homeDir, _ := os.UserHomeDir()
+	cacheDir := filepath.Join(homeDir, ".cache", "llama.cpp")
+	os.MkdirAll(cacheDir, 0755)
 
 	return nil
+}
+
+// installLlamaCppWindowsFallback Windows 下安装 llama-cpp-python 的降级方案
+func installLlamaCppWindowsFallback(condaPath string) error {
+	// 尝试安装 0.2.x 系列的最后一个稳定版本，通常有更多预编译包
+	versions := []string{"0.2.90", "0.2.85", "0.2.80", "0.2.70"}
+
+	for _, version := range versions {
+		fmt.Printf("尝试安装 llama-cpp-python==%s...\n", version)
+		installCmd := exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
+			fmt.Sprintf("llama-cpp-python==%s", version), "--no-cache-dir", "--force-reinstall", "--only-binary", ":all:")
+		installCmd.Env = os.Environ()
+
+		output, err := installCmd.CombinedOutput()
+		fmt.Printf("版本 %s 安装输出: %s\n", version, string(output))
+
+		if err == nil {
+			fmt.Printf("llama-cpp-python %s 安装成功\n", version)
+			return nil
+		}
+
+		// 如果是因为找不到该版本，继续尝试下一个
+		if strings.Contains(string(output), "Could not find") || strings.Contains(string(output), "No matching") {
+			continue
+		}
+	}
+
+	// 如果都失败了，尝试使用 conda-forge 安装
+	fmt.Println("尝试通过 conda-forge 安装...")
+	installCmd := exec.Command(condaPath, "install", "-n", "whisper", "-c", "conda-forge", "llama-cpp-python", "-y")
+	installCmd.Env = os.Environ()
+	output, err := installCmd.CombinedOutput()
+	fmt.Printf("conda-forge 安装输出: %s\n", string(output))
+
+	if err != nil {
+		return fmt.Errorf("Windows 下安装 llama-cpp-python 失败。建议手动安装 Visual Studio Build Tools 后重试，或使用 conda install -c conda-forge llama-cpp-python 手动安装。错误: %v", err)
+	}
+
+	fmt.Println("llama-cpp-python 通过 conda-forge 安装成功")
+	return nil
+}
+
+// getGoos 获取当前操作系统类型
+func getGoos() string {
+	// 通过运行 go env GOOS 来获取操作系统类型
+	cmd := exec.Command("go", "env", "GOOS")
+	output, err := cmd.Output()
+	if err == nil {
+		return strings.TrimSpace(string(output))
+	}
+	// 默认返回当前编译目标
+	return ""
 }
 
 // downloadModel 下载翻译模型
