@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -278,16 +279,17 @@ func (a *App) extractKeyFrameAtTime(timestamp float64, videoPath, outputDir stri
 		cleanContent = cleanContent[:20]
 	}
 
-	filename := fmt.Sprintf("ppt_%02d_%02d_%02d_%03d_%s.png",
-		hours, minutes, seconds, milliseconds, cleanContent)
-	outputPath := filepath.Join(outputDir, filename)
-
 	// 获取 conda路径
 	condaPath := getCondaPath()
 	if condaPath == "" {
 		fmt.Printf("[智能PPT] 未找到 conda\n")
 		return nil
 	}
+
+	// 使用临时文件名先提取帧
+	tempFilename := fmt.Sprintf("temp_%02d_%02d_%02d_%03d_%d.png",
+		hours, minutes, seconds, milliseconds, index)
+	tempPath := filepath.Join(outputDir, tempFilename)
 
 	// 使用 ffmpeg 提取帧
 	cmd := exec.Command(
@@ -298,7 +300,7 @@ func (a *App) extractKeyFrameAtTime(timestamp float64, videoPath, outputDir stri
 		"-vframes", "1",
 		"-q:v", "2", //高质量
 		"-y",
-		outputPath,
+		tempPath,
 	)
 
 	//执行
@@ -307,6 +309,29 @@ func (a *App) extractKeyFrameAtTime(timestamp float64, videoPath, outputDir stri
 
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("[智能PPT] 提取帧失败 (%.3fs): %v\n", timestamp, err)
+		return nil
+	}
+
+	// 计算文件MD5值
+	fileData, err := os.ReadFile(tempPath)
+	if err != nil {
+		fmt.Printf("[智能PPT] 读取文件失败: %v\n", err)
+		os.Remove(tempPath)
+		return nil
+	}
+	md5Hash := fmt.Sprintf("%x", md5.Sum(fileData))
+	// 取MD5前8位作为短标识
+	shortMD5 := md5Hash[:8]
+
+	// 生成最终文件名（包含MD5）
+	filename := fmt.Sprintf("ppt_%02d_%02d_%02d_%03d_%s_%s.png",
+		hours, minutes, seconds, milliseconds, cleanContent, shortMD5)
+	outputPath := filepath.Join(outputDir, filename)
+
+	// 重命名文件
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		fmt.Printf("[智能PPT] 重命名文件失败: %v\n", err)
+		os.Remove(tempPath)
 		return nil
 	}
 

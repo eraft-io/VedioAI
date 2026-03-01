@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -118,17 +121,17 @@ func installLlamaCpp() error {
 
 	// 检测操作系统和硬件
 	homeDir, _ := os.UserHomeDir()
-	
+
 	// macOS 启用 Metal 支持
 	installCmd := exec.Command(condaPath, "run", "-n", "whisper", "python", "-m", "pip", "install",
 		"llama-cpp-python", "--no-cache-dir", "--force-reinstall")
-	
+
 	// 设置环境变量启用 Metal (macOS)
 	env := os.Environ()
 	env = append(env, "CMAKE_ARGS=-DGGML_METAL=ON")
 	env = append(env, "FORCE_CMAKE=1")
 	installCmd.Env = env
-	
+
 	output, err := installCmd.CombinedOutput()
 
 	fmt.Printf("安装输出: %s\n", string(output))
@@ -138,11 +141,11 @@ func installLlamaCpp() error {
 	}
 
 	fmt.Println("llama-cpp-python 安装成功")
-	
+
 	// 创建 Metal 缓存目录（如果不存在）
 	metalCacheDir := filepath.Join(homeDir, ".cache", "llama.cpp")
 	os.MkdirAll(metalCacheDir, 0755)
-	
+
 	return nil
 }
 
@@ -207,7 +210,7 @@ func downloadModel(ctx context.Context) error {
 // downloadWithModelScope 使用 modelscope 命令行工具下载模型
 func downloadWithModelScope(ctx context.Context, modelPath string) error {
 	modelDir := filepath.Dir(modelPath)
-	
+
 	// 检查 modelscope 是否已安装
 	cmd := exec.Command("modelscope", "--version")
 	if err := cmd.Run(); err != nil {
@@ -228,15 +231,15 @@ func downloadWithModelScope(ctx context.Context, modelPath string) error {
 
 	// 使用 modelscope 下载模型
 	// modelscope download --model Qwen/Qwen2.5-3B-Instruct-GGUF --include qwen2.5-3b-instruct-q4_k_m.gguf
-	downloadCmd := exec.Command("modelscope", "download", 
+	downloadCmd := exec.Command("modelscope", "download",
 		"--model", "Qwen/Qwen2.5-3B-Instruct-GGUF",
 		"--include", "qwen2.5-3b-instruct-q4_k_m.gguf",
 		"--local_dir", modelDir)
-	
+
 	// 获取 stdout 和 stderr
 	stdout, _ := downloadCmd.StdoutPipe()
 	stderr, _ := downloadCmd.StderrPipe()
-	
+
 	if err := downloadCmd.Start(); err != nil {
 		return fmt.Errorf("启动 modelscope 下载失败: %v", err)
 	}
@@ -256,7 +259,7 @@ func downloadWithModelScope(ctx context.Context, modelPath string) error {
 			}
 		}
 	}()
-	
+
 	go func() {
 		if stderr != nil {
 			buf := make([]byte, 1024)
@@ -738,13 +741,42 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 
 	// 确定输出路径
 	var outputPath string
+	var videoDir string
 	if videoPath != "" {
-		videoDir := filepath.Dir(videoPath)
+		videoDir = filepath.Dir(videoPath)
 		baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 		outputPath = filepath.Join(videoDir, baseName+"_bilingual.html")
 	} else {
 		homeDir, _ := os.UserHomeDir()
+		videoDir = homeDir
 		outputPath = filepath.Join(homeDir, "video_bilingual.html")
+	}
+
+	// 读取 intelligent_ppt 目录下的图片
+	pptDir := filepath.Join(videoDir, "intelligent_ppt")
+	var pptImages []PPTImageInfo
+	if _, err := os.Stat(pptDir); err == nil {
+		// 目录存在，读取图片
+		files, err := os.ReadDir(pptDir)
+		if err == nil {
+			for _, file := range files {
+				if !file.IsDir() && (strings.HasSuffix(strings.ToLower(file.Name()), ".png") ||
+					strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") ||
+					strings.HasSuffix(strings.ToLower(file.Name()), ".jpeg")) {
+					// 从文件名提取时间戳
+					timestamp := extractTimestampFromFilename(file.Name())
+					pptImages = append(pptImages, PPTImageInfo{
+						Filename:  file.Name(),
+						Path:      filepath.Join(pptDir, file.Name()),
+						Timestamp: timestamp,
+					})
+				}
+			}
+			// 按时间戳排序
+			sort.Slice(pptImages, func(i, j int) bool {
+				return pptImages[i].Timestamp < pptImages[j].Timestamp
+			})
+		}
 	}
 
 	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
@@ -754,7 +786,7 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 	})
 
 	// 生成 HTML 内容
-	htmlContent := generateBilingualHTML(videoPath, subtitles)
+	htmlContent := generateBilingualHTML(videoPath, subtitles, pptImages)
 
 	// 写入文件
 	if err := os.WriteFile(outputPath, []byte(htmlContent), 0644); err != nil {
@@ -775,8 +807,34 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 	return result
 }
 
+// PPTImageInfo PPT图片信息
+type PPTImageInfo struct {
+	Filename  string
+	Path      string
+	Timestamp float64
+}
+
+// extractTimestampFromFilename 从文件名提取时间戳
+func extractTimestampFromFilename(filename string) float64 {
+	// 文件名格式: ppt_HH_MM_SS_mmm_xxx.png
+	re := regexp.MustCompile(`ppt_(\d+)_(\d+)_(\d+)_(\d+)`)
+	matches := re.FindStringSubmatch(filename)
+	if len(matches) >= 5 {
+		hours := 0
+		minutes := 0
+		seconds := 0
+		milliseconds := 0
+		fmt.Sscanf(matches[1], "%d", &hours)
+		fmt.Sscanf(matches[2], "%d", &minutes)
+		fmt.Sscanf(matches[3], "%d", &seconds)
+		fmt.Sscanf(matches[4], "%d", &milliseconds)
+		return float64(hours*3600+minutes*60+seconds) + float64(milliseconds)/1000.0
+	}
+	return 0
+}
+
 // generateBilingualHTML 生成双语字幕对照 HTML 页面
-func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
+func generateBilingualHTML(videoPath string, subtitles []SubtitleItem, pptImages []PPTImageInfo) string {
 	videoName := "Video Bilingual Subtitles"
 	if videoPath != "" {
 		videoName = strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
@@ -793,7 +851,7 @@ func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
 
 	var sb strings.Builder
 
-	// HTML 头部
+	// HTML 头部 - Stanford CS336 风格
 	sb.WriteString(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -808,97 +866,118 @@ func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #ffffff;
+            color: #333;
+            line-height: 1.6;
             min-height: 100vh;
-            padding: 20px;
         }
         .container {
-            max-width: 900px;
+            max-width: 800px;
             margin: 0 auto;
+            padding: 40px 20px;
         }
         .header {
-            background: white;
-            border-radius: 16px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e8e8e8;
         }
         .header h1 {
-            color: #333;
-            font-size: 28px;
-            margin-bottom: 15px;
+            color: #2c3e50;
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: -0.5px;
         }
         .stats {
             display: flex;
-            gap: 30px;
+            gap: 24px;
             color: #666;
             font-size: 14px;
+            flex-wrap: wrap;
         }
         .stats span {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e8e8e8;
         }
         .subtitle-list {
-            background: white;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
         .subtitle-item {
-            padding: 20px 30px;
-            border-bottom: 1px solid #f0f0f0;
-            transition: background 0.2s;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 8px;
+            border-left: 4px solid #0066cc;
+            transition: all 0.2s ease;
         }
         .subtitle-item:hover {
-            background: #f8f9ff;
-        }
-        .subtitle-item:last-child {
-            border-bottom: none;
+            background: #f5f5f5;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
         .time-badge {
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
+            color: #0066cc;
+            font-size: 13px;
+            font-weight: 600;
             margin-bottom: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
         }
         .english-text {
-            color: #333;
+            color: #2c3e50;
             font-size: 16px;
-            line-height: 1.6;
-            margin-bottom: 8px;
+            line-height: 1.7;
+            margin-bottom: 10px;
         }
         .chinese-text {
-            color: #666;
+            color: #555;
             font-size: 15px;
-            line-height: 1.6;
+            line-height: 1.7;
             padding-left: 16px;
-            border-left: 3px solid #667eea;
+            border-left: 2px solid #ddd;
         }
         .no-translation {
             color: #999;
             font-style: italic;
         }
+        .ppt-image {
+            margin-top: 16px;
+        }
+        .ppt-image img {
+            max-width: 100%;
+            border-radius: 6px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+        }
         .footer {
+            margin-top: 60px;
+            padding-top: 20px;
+            border-top: 1px solid #e8e8e8;
             text-align: center;
-            padding: 30px;
-            color: rgba(255,255,255,0.8);
+            color: #999;
             font-size: 13px;
         }
         @media (max-width: 600px) {
+            .container {
+                padding: 20px 16px;
+            }
             .header h1 {
-                font-size: 22px;
+                font-size: 24px;
             }
             .stats {
                 flex-direction: column;
-                gap: 10px;
+                gap: 8px;
             }
             .subtitle-item {
-                padding: 15px 20px;
+                padding: 16px;
             }
         }
     </style>
@@ -906,17 +985,19 @@ func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
 <body>
     <div class="container">
         <div class="header">
-            <h1>📺 ` + videoName + `</h1>
+            <h1>` + videoName + `</h1>
             <div class="stats">
-                <span>📝 字幕数量: ` + fmt.Sprintf("%d", len(subtitles)) + `</span>
-                <span>⏱️ 时长: ` + duration + `</span>
-                <span>📅 生成时间: ` + time.Now().Format("2006-01-02 15:04:05") + `</span>
+                <span>📝 ` + fmt.Sprintf("%d 条字幕", len(subtitles)) + `</span>
+                <span>⏱️ ` + duration + `</span>
+                <span>📅 ` + time.Now().Format("2006-01-02") + `</span>
             </div>
         </div>
+        <div class="section-title">双语字幕对照</div>
         <div class="subtitle-list">
 `)
 
 	// 字幕内容
+	pptImageIndex := 0
 	for i, sub := range subtitles {
 		startMin := int(sub.StartTime) / 60
 		startSec := int(sub.StartTime) % 60
@@ -936,6 +1017,32 @@ func generateBilingualHTML(videoPath string, subtitles []SubtitleItem) string {
 			sb.WriteString(`                <div class="chinese-text no-translation">（未翻译）</div>
 `)
 		}
+
+		// 检查是否有对应的 PPT 图片需要插入（在字幕时间范围内）
+		for pptImageIndex < len(pptImages) {
+			pptImg := pptImages[pptImageIndex]
+			// 如果图片时间戳在当前字幕的时间范围内，插入图片
+			if pptImg.Timestamp >= sub.StartTime && pptImg.Timestamp <= sub.EndTime {
+				// 将图片转为 base64 或直接使用相对路径
+				imgData, err := os.ReadFile(pptImg.Path)
+				if err == nil {
+					// 使用 base64 编码图片
+					base64Img := base64.StdEncoding.EncodeToString(imgData)
+					sb.WriteString(fmt.Sprintf(`                <div class="ppt-image">
+                    <img src="data:image/png;base64,%s" alt="PPT Slide" style="max-width: 100%%; border-radius: 8px; margin-top: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                </div>
+`, base64Img))
+				}
+				pptImageIndex++
+			} else if pptImg.Timestamp < sub.StartTime {
+				// 图片时间戳早于当前字幕，跳过
+				pptImageIndex++
+			} else {
+				// 图片时间戳晚于当前字幕，等待下一个字幕
+				break
+			}
+		}
+
 		sb.WriteString(`            </div>
 `)
 	}

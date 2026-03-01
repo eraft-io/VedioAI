@@ -46,7 +46,6 @@ function App() {
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [showTranslateButton, setShowTranslateButton] = useState<boolean>(false);
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
-  const [isExtractingIntelligentPPT, setIsExtractingIntelligentPPT] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -134,31 +133,6 @@ function App() {
     };
   }, []);
   
-  // 监听智能PPT提取进度事件
-  useEffect(() => {
-    const unsubscribe = EventsOn("intelligent:progress", (data: any) => {
-      setProgress(data.progress || 0);
-      setProgressMessage(data.message || '');
-        
-      if (data.status === 'processing') {
-        setShowProgress(true);
-      } else if (data.status === 'completed') {
-        setProgress(100);
-        setProgressMessage(data.message || '完成！');
-        setIsExtractingIntelligentPPT(false);
-        setTimeout(() => setShowProgress(false), 3000);
-      } else if (data.status === 'error') {
-        setShowProgress(false);
-        setIsExtractingIntelligentPPT(false);
-        setMessage(data.message);
-      }
-    });
-      
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
   // 检查 Whisper 安装状态
   useEffect(() => {
     checkWhisper();
@@ -362,20 +336,41 @@ function App() {
     }
   };
 
-  //总结字幕内容
+  //总结字幕内容（包含智能PPT提取）
   const handleSummarizeSubtitle = async () => {
     if (subtitles.length === 0) {
       setMessage('没有字幕可以总结');
       return;
     }
+    if (!videoPath) {
+      setMessage('请选择视频文件');
+      return;
+    }
   
     setIsSummarizing(true);
-    setMessage('正在生成视频摘要...');
+    setMessage('正在智能分析并生成双语字幕...');
     setShowProgress(true);
     setProgress(0);
-    setProgressMessage('正在准备...');
+    setProgressMessage('正在分析字幕内容并提取关键帧...');
   
     try {
+      //先提取智能PPT
+      const subtitleItems = subtitles.map((sub, index) => ({
+        id: sub.id || index,
+        startTime: sub.startTime,
+        endTime: sub.endTime,
+        text: sub.text,
+        translatedText: sub.translatedText || ''
+      }));
+
+      //提取PPT关键帧
+      const pptResult: main.IntelligentPPTResult = await AnalyzeSubtitlesByContent(subtitleItems as any, videoPath);
+      
+      if (pptResult.success) {
+        setProgressMessage(`已提取 ${pptResult.frames?.length || 0} 个关键帧，正在生成HTML...`);
+      }
+
+      //然后生成双语HTML
       const summarySubtitles = subtitles.map((sub, index) => ({
         id: sub.id || index,
         startTime: sub.startTime,
@@ -387,7 +382,7 @@ function App() {
       const result = await SummarizeSubtitles(summarySubtitles as any, videoPath);
         
       if (result.success) {
-        setMessage(`摘要已保存到: ${result.outputPath}`);
+        setMessage(`双语字幕已保存到: ${result.outputPath}`);
       } else {
         setMessage(`生成摘要失败: ${result.message}`);
       }
@@ -399,48 +394,6 @@ function App() {
     }
   };
   
-  //智能提取PPT关键帧
-  const handleExtractIntelligentPPT = async () => {
-    if (subtitles.length === 0) {
-      setMessage('请先生成字幕');
-      return;
-    }
-    if (!videoPath) {
-      setMessage('请选择视频文件');
-      return;
-    }
-  
-    setIsExtractingIntelligentPPT(true);
-    setMessage('正在智能分析字幕内容并提取关键帧...');
-    setShowProgress(true);
-    setProgress(0);
-    setProgressMessage('正在分析字幕内容...');
-  
-    try {
-      //字幕格式
-      const subtitleItems = subtitles.map((sub, index) => ({
-        id: sub.id || index,
-        startTime: sub.startTime,
-        endTime: sub.endTime,
-        text: sub.text,
-        translatedText: sub.translatedText || ''
-      }));
-  
-      const result: main.IntelligentPPTResult = await AnalyzeSubtitlesByContent(subtitleItems as any, videoPath);
-        
-      if (result.success) {
-        setMessage(result.message || `成功提取 ${result.frames?.length || 0} 个关键帧`);
-      } else {
-        setMessage(result.message || '智能PPT提取失败');
-        setShowProgress(false);
-      }
-    } catch (err) {
-      setMessage('智能PPT提取时发生错误: ' + String(err));
-      setShowProgress(false);
-      setIsExtractingIntelligentPPT(false);
-    }
-  };
-
   // 更新当前时间
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time);
@@ -497,7 +450,6 @@ function App() {
         onImportSubtitle={handleImportSubtitle}
         onExportSubtitle={handleExportSubtitle}
         onSummarizeSubtitle={handleSummarizeSubtitle}
-        onExtractIntelligentPPT={handleExtractIntelligentPPT}
         hasSubtitles={subtitles.length > 0}
       />
 

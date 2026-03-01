@@ -188,22 +188,6 @@
   cursor: not-allowed;
 }
 
-.btn-intelligent-ppt {
-  background: #9c27b0;
-  color: white;
-  min-width: 140px;
-  justify-content: center;
-}
-
-.btn-intelligent-ppt:hover:not(:disabled) {
-  background: #7b1fa2;
-}
-
-.btn-intelligent-ppt:disabled {
-  background: #ce93d8;
-  cursor: not-allowed;
-}
-
 .spinner {
   width: 16px;
   height: 16px;

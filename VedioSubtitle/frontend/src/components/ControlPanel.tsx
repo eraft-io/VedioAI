@@ -5,7 +5,6 @@ interface ControlPanelProps {
   isGenerating: boolean;
   isTranslating: boolean;
   isSummarizing?: boolean;
-  isExtractingIntelligentPPT?: boolean;
   showTranslateButton: boolean;
   selectedModel: string;
   selectedLanguage: string;
@@ -20,7 +19,6 @@ interface ControlPanelProps {
   onImportSubtitle?: () => void;
   onExportSubtitle?: () => void;
   onSummarizeSubtitle?: () => void;
-  onExtractIntelligentPPT?: () => void;
   hasSubtitles?: boolean;
 }
 
@@ -29,7 +27,6 @@ const ControlPanel = ({
   isGenerating,
   isTranslating,
   isSummarizing,
-  isExtractingIntelligentPPT,
   showTranslateButton,
   selectedModel,
   selectedLanguage,
@@ -44,7 +41,6 @@ const ControlPanel = ({
   onImportSubtitle,
   onExportSubtitle,
   onSummarizeSubtitle,
-  onExtractIntelligentPPT,
   hasSubtitles
 }: ControlPanelProps) => {
   const models = [
@@ -217,34 +213,7 @@ const ControlPanel = ({
                     <line x1="16" y1="17" x2="8" y2="17"></line>
                     <polyline points="10 9 9 9 8 9"></polyline>
                   </svg>
-                  导出双语
-                </>
-              )}
-            </button>
-          </div>
-        )}
-
-        {onExtractIntelligentPPT && (
-          <div className="control-group">
-            <label>&nbsp;</label>
-            <button 
-              className="btn btn-intelligent-ppt" 
-              onClick={onExtractIntelligentPPT}
-              disabled={!hasSubtitles || !videoPath || isExtractingIntelligentPPT}
-            >
-              {isExtractingIntelligentPPT ? (
-                <>
-                  <span className="spinner"></span>
-                  提取中...
-                </>
-              ) : (
-                <>
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                    <path d="M2 17l10 5 10-5"></path>
-                    <path d="M2 12l10 5 10-5"></path>
-                  </svg>
-                 提取PPT
+                  智能总结
                 </>
               )}
             </button>
