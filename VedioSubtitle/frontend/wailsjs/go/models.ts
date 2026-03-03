@@ -1,19 +1,19 @@
 export namespace main {
 	
-	export class ExportSubtitleResult {
+	export class APIKeyResult {
 	    success: boolean;
 	    message: string;
-	    path: string;
+	    has_key: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new ExportSubtitleResult(source);
+	        return new APIKeyResult(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
 	        this.message = source["message"];
-	        this.path = source["path"];
+	        this.has_key = source["has_key"];
 	    }
 	}
 	export class SubtitleItem {
@@ -34,6 +34,56 @@ export namespace main {
 	        this.endTime = source["endTime"];
 	        this.text = source["text"];
 	        this.translatedText = source["translatedText"];
+	    }
+	}
+	export class CloudTranslateResult {
+	    success: boolean;
+	    message: string;
+	    subtitles: SubtitleItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CloudTranslateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.subtitles = this.convertValues(source["subtitles"], SubtitleItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExportSubtitleResult {
+	    success: boolean;
+	    message: string;
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportSubtitleResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.path = source["path"];
 	    }
 	}
 	export class ImportSubtitleResult {
@@ -160,6 +210,20 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class SaveAPIKeyResult {
+	    success: boolean;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveAPIKeyResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	    }
 	}
 	
 	export class SubtitleResult {

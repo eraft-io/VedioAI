@@ -17,6 +17,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// CloudTranslateResult 云端翻译结果
+type CloudTranslateResult struct {
+	Success   bool           `json:"success"`
+	Message   string         `json:"message"`
+	Subtitles []SubtitleItem `json:"subtitles"`
+}
+
 // TranslateResult 翻译结果
 type TranslateResult struct {
 	Success   bool           `json:"success"`
@@ -707,6 +714,72 @@ except Exception as e:
 	result = cleanTranslationResult(result, "")
 
 	return result, nil
+}
+
+// TranslateSubtitlesWithQwen 使用阿里云百炼千问翻译字幕
+func (a *App) TranslateSubtitlesWithQwen(subtitles []SubtitleItem) CloudTranslateResult {
+	result := CloudTranslateResult{
+		Success: false,
+	}
+
+	if len(subtitles) == 0 {
+		result.Message = "没有字幕需要翻译"
+		return result
+	}
+
+	// 检查 API Key
+	apiKey, err := GetQwenAPIKey()
+	if err != nil {
+		result.Message = "请先配置阿里云 API Key"
+		return result
+	}
+	_ = apiKey // 避免未使用警告
+
+	runtime.EventsEmit(a.ctx, "translate:progress", TranslateProgress{
+		Status:   "processing",
+		Progress: 0,
+		Message:  "正在调用阿里云百炼千问模型...",
+	})
+
+	// 翻译每个字幕
+	translatedSubtitles := make([]SubtitleItem, len(subtitles))
+	for i, subtitle := range subtitles {
+		progress := float64(i) / float64(len(subtitles)) * 100
+		runtime.EventsEmit(a.ctx, "translate:progress", TranslateProgress{
+			Status:   "processing",
+			Progress: progress,
+			Message:  fmt.Sprintf("正在翻译字幕 %d/%d...", i+1, len(subtitles)),
+		})
+
+		translatedText, err := TranslateWithQwen(a.ctx, subtitle.Text)
+		if err != nil {
+			// 翻译失败，保留原文
+			translatedText = subtitle.Text
+			fmt.Printf("[翻译失败] 原文：%s -> 错误：%v\n", subtitle.Text, err)
+		} else {
+			fmt.Printf("[翻译成功] 原文：%s -> 译文：%s\n", subtitle.Text, translatedText)
+		}
+
+		translatedSubtitles[i] = SubtitleItem{
+			ID:             subtitle.ID,
+			StartTime:      subtitle.StartTime,
+			EndTime:        subtitle.EndTime,
+			Text:           subtitle.Text,
+			TranslatedText: translatedText,
+		}
+	}
+
+	runtime.EventsEmit(a.ctx, "translate:progress", TranslateProgress{
+		Status:   "completed",
+		Progress: 100,
+		Message:  "翻译完成！",
+	})
+
+	result.Success = true
+	result.Message = "翻译成功！"
+	result.Subtitles = translatedSubtitles
+
+	return result
 }
 
 // cleanTranslationResult 清理翻译结果

@@ -6,6 +6,8 @@ export function AnalyzeSubtitlesByContent(arg1:Array<main.SubtitleItem>,arg2:str
 
 export function BuildWhisperImage():Promise<Record<string, any>>;
 
+export function CheckQwenAPIKey():Promise<main.APIKeyResult>;
+
 export function CheckTranslateStatus():Promise<Record<string, any>>;
 
 export function CheckWhisperStatus():Promise<Record<string, any>>;
@@ -32,6 +34,8 @@ export function InstallWhisper():Promise<Record<string, any>>;
 
 export function ParseTime(arg1:string):Promise<number>;
 
+export function SaveQwenAPIKey(arg1:string):Promise<main.SaveAPIKeyResult>;
+
 export function SelectSubtitleFile():Promise<string>;
 
 export function SelectVideoFile():Promise<string>;
@@ -39,5 +43,7 @@ export function SelectVideoFile():Promise<string>;
 export function SummarizeSubtitles(arg1:Array<main.SubtitleItem>,arg2:string):Promise<main.SummarizeResult>;
 
 export function TranslateSubtitles(arg1:Array<main.SubtitleItem>):Promise<main.TranslateResult>;
+
+export function TranslateSubtitlesWithQwen(arg1:Array<main.SubtitleItem>):Promise<main.CloudTranslateResult>;
 
 export function TranslateText(arg1:string):Promise<Record<string, any>>;

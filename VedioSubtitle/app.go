@@ -13,6 +13,19 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// APIKeyResult API Key 检查结果
+type APIKeyResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	HasKey  bool   `json:"has_key"`
+}
+
+// SaveAPIKeyResult 保存 API Key 结果
+type SaveAPIKeyResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 // App struct
 type App struct {
 	ctx context.Context
@@ -912,22 +925,66 @@ func (a *App) installMinicondaWindows() (string, error) {
 		return "", fmt.Errorf("安装后未找到 conda，请检查安装是否成功")
 	}
 
-	fmt.Printf("[Miniconda] 安装成功: %s\n", installedPath)
+	fmt.Printf("[Miniconda] 安装成功：%s\n", installedPath)
 
 	// 接受 Conda Terms of Service（Windows 下需要接受所有可能用到的 channel）
 	fmt.Printf("[Miniconda] 接受 Terms of Service...\n")
 	channels := []string{
 		"https://repo.anaconda.com/pkgs/main",
 		"https://repo.anaconda.com/pkgs/r",
-		"https://repo.anaconda.com/pkgs/msys2",
-		"https://conda.anaconda.org/conda-forge",
-		"https://conda.anaconda.org/pytorch",
-		"https://conda.anaconda.org/nvidia",
-		"https://conda.anaconda.org/huggingface",
 	}
+
 	for _, channel := range channels {
-		exec.Command(installedPath, "tos", "accept", "--override-channels", "--channel", channel).Run()
+		cmd := exec.Command(installedPath, "config", "--add", "channels", channel)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("[Miniconda] 添加 channel %s 失败：%v\n", channel, err)
+		}
 	}
 
 	return installedPath, nil
+}
+
+// CheckQwenAPIKey 检查是否配置了阿里云 API Key
+func (a *App) CheckQwenAPIKey() APIKeyResult {
+	result := APIKeyResult{
+		Success: true,
+	}
+
+	apiKey, err := GetQwenAPIKey()
+	if err != nil {
+		result.HasKey = false
+		result.Message = err.Error()
+		return result
+	}
+
+	result.HasKey = true
+	result.Message = "已配置 API Key"
+	_ = apiKey // 使用变量避免警告
+	return result
+}
+
+// SaveQwenAPIKey 保存阿里云 API Key
+func (a *App) SaveQwenAPIKey(apiKey string) SaveAPIKeyResult {
+	result := SaveAPIKeyResult{
+		Success: false,
+	}
+
+	if strings.TrimSpace(apiKey) == "" {
+		result.Message = "API Key 不能为空"
+		return result
+	}
+
+	if err := saveQwenAPIKeyInternal(apiKey); err != nil {
+		result.Message = err.Error()
+		return result
+	}
+
+	result.Success = true
+	result.Message = "API Key 保存成功"
+	return result
+}
+
+// saveQwenAPIKeyInternal 内部保存 API Key 函数
+func saveQwenAPIKeyInternal(apiKey string) error {
+	return SaveQwenAPIKey(apiKey)
 }

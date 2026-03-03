@@ -10,6 +10,10 @@ export function BuildWhisperImage() {
   return window['go']['main']['App']['BuildWhisperImage']();
 }
 
+export function CheckQwenAPIKey() {
+  return window['go']['main']['App']['CheckQwenAPIKey']();
+}
+
 export function CheckTranslateStatus() {
   return window['go']['main']['App']['CheckTranslateStatus']();
 }
@@ -62,6 +66,10 @@ export function ParseTime(arg1) {
   return window['go']['main']['App']['ParseTime'](arg1);
 }
 
+export function SaveQwenAPIKey(arg1) {
+  return window['go']['main']['App']['SaveQwenAPIKey'](arg1);
+}
+
 export function SelectSubtitleFile() {
   return window['go']['main']['App']['SelectSubtitleFile']();
 }
@@ -76,6 +84,10 @@ export function SummarizeSubtitles(arg1, arg2) {
 
 export function TranslateSubtitles(arg1) {
   return window['go']['main']['App']['TranslateSubtitles'](arg1);
+}
+
+export function TranslateSubtitlesWithQwen(arg1) {
+  return window['go']['main']['App']['TranslateSubtitlesWithQwen'](arg1);
 }
 
 export function TranslateText(arg1) {

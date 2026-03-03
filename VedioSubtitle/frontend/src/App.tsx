@@ -5,15 +5,18 @@ import SubtitlePanel from './components/SubtitlePanel';
 import ControlPanel from './components/ControlPanel';
 import InstallGuide from './components/InstallGuide';
 import ProgressBar from './components/ProgressBar';
+import APIKeyDialog from './components/APIKeyDialog';
 import { 
   SelectVideoFile, 
   GenerateSubtitle,
   CheckWhisperStatus,
   InstallWhisper,
-  TranslateSubtitles,
   ExportSubtitlesToJSON,
   SummarizeSubtitles,
-  AnalyzeSubtitlesByContent
+  AnalyzeSubtitlesByContent,
+  CheckQwenAPIKey,
+  SaveQwenAPIKey,
+  TranslateSubtitlesWithQwen
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 import { EventsOn } from "../wailsjs/runtime";
@@ -46,6 +49,7 @@ function App() {
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [showTranslateButton, setShowTranslateButton] = useState<boolean>(false);
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
+  const [showAPIKeyDialog, setShowAPIKeyDialog] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -228,32 +232,65 @@ function App() {
       setMessage('请先生成字幕');
       return;
     }
-
-    setIsTranslating(true);
-    setMessage('正在翻译字幕，请稍候...');
-    setShowProgress(true);
-    setProgress(0);
-    setProgressMessage('正在初始化翻译环境...');
-
+  
+    // 直接调用阿里云千问翻译
+    handleCloudTranslate();
+  };
+  
+  // 使用阿里云千问翻译
+  const handleCloudTranslate = async () => {
+  
+    // 检查 API Key
     try {
-      const result = await TranslateSubtitles(subtitles as any);
+      const keyCheck = await CheckQwenAPIKey();
+      if (!keyCheck.has_key) {
+        // 需要输入 API Key
+        setShowAPIKeyDialog(true);
+        return;
+      }
+  
+      // 开始翻译
+      setIsTranslating(true);
+      setMessage('正在调用阿里云百炼千问翻译...');
+      setShowProgress(true);
+      setProgress(0);
+      setProgressMessage('正在连接阿里云...');
+  
+      const result = await TranslateSubtitlesWithQwen(subtitles as any);
+        
       if (result.success) {
         const newSubtitles = result.subtitles || [];
         setSubtitles(newSubtitles);
-        // 调试：检查翻译结果
-        const firstSub = newSubtitles[0];
-        setMessage(`翻译完成: ${newSubtitles.length}条, 第一条翻译=${firstSub?.translatedText?.substring(0, 20) || '空'}`);
+        setMessage(`翻译完成：${newSubtitles.length}条`);
       } else {
         setMessage(result.message || '翻译失败');
         setShowProgress(false);
+        setIsTranslating(false);
       }
     } catch (err) {
-      setMessage('翻译时发生错误');
+      setMessage('翻译时发生错误：' + String(err));
       setShowProgress(false);
       setIsTranslating(false);
     }
   };
-
+  
+  // 保存 API Key
+  const handleSaveAPIKey = async (apiKey: string) => {
+    try {
+      const result = await SaveQwenAPIKey(apiKey);
+      if (result.success) {
+        setMessage('API Key 保存成功！');
+        setShowAPIKeyDialog(false);
+        // 继续翻译
+        handleCloudTranslate();
+      } else {
+        setMessage('保存失败：' + result.message);
+      }
+    } catch (err) {
+      setMessage('保存 API Key 失败：' + String(err));
+    }
+  };
+  
   // 导入字幕
   const handleImportSubtitle = async () => {
     console.log('[导入字幕] ========== 开始导入流程 ==========');
@@ -678,6 +715,15 @@ function App() {
           onClose={() => setShowGuide(false)}
           onRefresh={checkWhisper}
           onInstall={handleInstallWhisper}
+        />
+      )}
+
+
+
+      {showAPIKeyDialog && (
+        <APIKeyDialog
+          onClose={() => setShowAPIKeyDialog(false)}
+          onSave={handleSaveAPIKey}
         />
       )}
 
