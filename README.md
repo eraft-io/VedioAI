@@ -12,6 +12,14 @@ A desktop application for automatic video subtitle generation and translation, b
 - **Multiple Models**: Supports various Whisper models (tiny, base, small, medium, large)
 - **Multi-language Support**: Auto-detects language or specify manually
 
+## Demo
+
+![demo](demo.gif)
+
+## Download
+
+[v1.0.0](https://github.com/eraft-io/VedioAI/releases/tag/v1.0.0)
+
 ## Tech Stack
 
 - **Backend**: Go with Wails v2
