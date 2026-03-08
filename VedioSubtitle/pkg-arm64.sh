@@ -48,9 +48,16 @@ if pgrep -x "VideoSubtitle" > /dev/null; then
     sleep 2
 fi
 
+# 清理构建目录
 rm -rf build/bin/*.app
 rm -rf build/darwin/arm64
+
+# 清理上次的 PKG 和 DMG 文件
+echo "清理上次的打包文件..."
 rm -f build/pkg/VideoSubtitle-*-arm64.pkg
+rm -f build/pkg/VideoSubtitle-*-arm64.dmg
+rm -f build/pkg/temp_*.dmg
+rm -rf build/dmg_temp
 
 # 创建输出目录
 mkdir -p build/pkg
