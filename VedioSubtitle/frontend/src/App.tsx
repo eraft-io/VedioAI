@@ -6,6 +6,7 @@ import ControlPanel from './components/ControlPanel';
 import InstallGuide from './components/InstallGuide';
 import ProgressBar from './components/ProgressBar';
 import APIKeyDialog from './components/APIKeyDialog';
+import ExportFormatSelector from './components/ExportFormatSelector';
 import { 
   SelectVideoFile, 
   GenerateSubtitle,
@@ -50,6 +51,7 @@ function App() {
   const [showTranslateButton, setShowTranslateButton] = useState<boolean>(false);
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
   const [showAPIKeyDialog, setShowAPIKeyDialog] = useState<boolean>(false);
+  const [showExportFormatSelector, setShowExportFormatSelector] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -641,8 +643,26 @@ function App() {
       return;
     }
   
+    // 显示格式选择对话框
+    setShowExportFormatSelector(true);
+  };
+
+  // 导出为 HTML 格式
+  const handleExportHTML = async (imageDir: string) => {
+    setShowExportFormatSelector(false);
+    await performSummarize('html', imageDir);
+  };
+
+  // 导出为 Markdown 格式
+  const handleExportMarkdown = async (imageDir: string) => {
+    setShowExportFormatSelector(false);
+    await performSummarize('markdown', imageDir);
+  };
+
+  // 执行总结导出
+  const performSummarize = async (format: string, imageDir: string) => {
     setIsSummarizing(true);
-    setMessage('正在智能分析并生成双语字幕...');
+    setMessage(`正在生成${format === 'markdown' ? 'Markdown' : 'HTML'}文档...`);
     setShowProgress(true);
     setProgress(0);
     setProgressMessage('正在分析字幕内容并提取关键帧...');
@@ -658,13 +678,13 @@ function App() {
       }));
 
       //提取PPT关键帧
-      const pptResult: main.IntelligentPPTResult = await AnalyzeSubtitlesByContent(subtitleItems as any, videoPath);
+      const pptResult: main.IntelligentPPTResult = await AnalyzeSubtitlesByContent(subtitleItems as any, videoPath, imageDir);
       
       if (pptResult.success) {
-        setProgressMessage(`已提取 ${pptResult.frames?.length || 0} 个关键帧，正在生成HTML...`);
+        setProgressMessage(`已提取 ${pptResult.frames?.length || 0} 个关键帧，正在生成${format === 'markdown' ? 'Markdown' : 'HTML'}...`);
       }
 
-      //然后生成双语HTML
+      //然后生成双语文档
       const summarySubtitles = subtitles.map((sub, index) => ({
         id: sub.id || index,
         startTime: sub.startTime,
@@ -673,16 +693,16 @@ function App() {
         translatedText: sub.translatedText || ''
       }));
   
-      const result = await SummarizeSubtitles(summarySubtitles as any, videoPath);
+      const result = await SummarizeSubtitles(summarySubtitles as any, videoPath, format, imageDir);
         
       if (result.success) {
-        setMessage(`双语字幕已保存到: ${result.outputPath}`);
+        setMessage(`${format === 'markdown' ? 'Markdown' : 'HTML'}文档已保存到: ${result.outputPath}`);
       } else {
-        setMessage(`生成摘要失败: ${result.message}`);
+        setMessage(`生成文档失败: ${result.message}`);
       }
     } catch (err) {
       console.error('总结失败:', err);
-      setMessage('生成摘要失败: ' + String(err));
+      setMessage('生成文档失败: ' + String(err));
     } finally {
       setIsSummarizing(false);
     }
@@ -724,6 +744,14 @@ function App() {
         <APIKeyDialog
           onClose={() => setShowAPIKeyDialog(false)}
           onSave={handleSaveAPIKey}
+        />
+      )}
+
+      {showExportFormatSelector && (
+        <ExportFormatSelector
+          onClose={() => setShowExportFormatSelector(false)}
+          onSelectHTML={handleExportHTML}
+          onSelectMarkdown={handleExportMarkdown}
         />
       )}
 

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/md5"
+	// "crypto/md5"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -49,7 +49,7 @@ type KeyFrameInfo struct {
 }
 
 // AnalyzeSubtitlesByContent基于字幕内容分析关键帧
-func (a *App) AnalyzeSubtitlesByContent(subtitles []SubtitleItem, videoPath string) IntelligentPPTResult {
+func (a *App) AnalyzeSubtitlesByContent(subtitles []SubtitleItem, videoPath string, imageDir string) IntelligentPPTResult {
 	result := IntelligentPPTResult{
 		Success: false,
 		Message: "",
@@ -67,9 +67,14 @@ func (a *App) AnalyzeSubtitlesByContent(subtitles []SubtitleItem, videoPath stri
 		return result
 	}
 
+	// 默认图片目录
+	if imageDir == "" {
+		imageDir = "intelligent_ppt"
+	}
+
 	// 创建输出目录
 	videoDir := filepath.Dir(videoPath)
-	pptDir := filepath.Join(videoDir, "intelligent_ppt")
+	pptDir := filepath.Join(videoDir, imageDir)
 	if err := os.MkdirAll(pptDir, 0755); err != nil {
 		result.Message = fmt.Sprintf("创建目录失败: %v", err)
 		return result
@@ -312,20 +317,20 @@ func (a *App) extractKeyFrameAtTime(timestamp float64, videoPath, outputDir stri
 		return nil
 	}
 
-	// 计算文件MD5值
-	fileData, err := os.ReadFile(tempPath)
-	if err != nil {
-		fmt.Printf("[智能PPT] 读取文件失败: %v\n", err)
-		os.Remove(tempPath)
-		return nil
-	}
-	md5Hash := fmt.Sprintf("%x", md5.Sum(fileData))
-	// 取MD5前8位作为短标识
-	shortMD5 := md5Hash[:8]
+	// // 计算文件MD5值
+	// fileData, err := os.ReadFile(tempPath)
+	// if err != nil {
+	// 	fmt.Printf("[智能PPT] 读取文件失败: %v\n", err)
+	// 	os.Remove(tempPath)
+	// 	return nil
+	// }
+	// md5Hash := fmt.Sprintf("%x", md5.Sum(fileData))
+	// // 取MD5前8位作为短标识
+	// shortMD5 := md5Hash[:8]
 
 	// 生成最终文件名（包含MD5）
-	filename := fmt.Sprintf("ppt_%02d_%02d_%02d_%03d_%s_%s.png",
-		hours, minutes, seconds, milliseconds, cleanContent, shortMD5)
+	filename := fmt.Sprintf("ppt_%02d_%02d_%02d_%03d_%s.png",
+		hours, minutes, seconds, milliseconds, cleanContent)
 	outputPath := filepath.Join(outputDir, filename)
 
 	// 重命名文件

@@ -96,6 +96,16 @@ func getQwenConfigPath() string {
 
 // TranslateWithQwen 使用阿里云百炼千问模型翻译
 func TranslateWithQwen(ctx context.Context, text string) (string, error) {
+	return translateWithQwenModel(ctx, text, "qwen-turbo")
+}
+
+// TranslateWithQwenPlus 使用 qwen-plus 模型翻译（用于段落翻译）
+func TranslateWithQwenPlus(ctx context.Context, text string) (string, error) {
+	return translateWithQwenModel(ctx, text, "qwen-plus")
+}
+
+// translateWithQwenModel 通用的千问翻译函数
+func translateWithQwenModel(ctx context.Context, text string, model string) (string, error) {
 	apiKey, err := GetQwenAPIKey()
 	if err != nil {
 		return "", err
@@ -110,13 +120,13 @@ func TranslateWithQwen(ctx context.Context, text string) (string, error) {
 中文翻译：`, text)
 
 	reqBody := QwenRequest{
-		Model: "qwen-turbo",
+		Model: model,
 		Input: QwenInput{
 			Prompt: prompt,
 		},
 		Parameters: QwenParameters{
 			Temperature: 0.1,
-			MaxTokens:   512,
+			MaxTokens:   2048, // 段落翻译需要更多token
 		},
 	}
 

@@ -891,8 +891,10 @@ type SummarizeResult struct {
 	OutputPath string `json:"outputPath"`
 }
 
-// SummarizeSubtitles 导出双语字幕对照 HTML 页面
-func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) SummarizeResult {
+// SummarizeSubtitles 导出双语字幕对照页面，支持 HTML 和 Markdown 格式
+// format: "html" 或 "markdown"
+// imageDir: 图片目录名，为空则使用 "intelligent_ppt"
+func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string, format string, imageDir string) SummarizeResult {
 	result := SummarizeResult{
 		Success: false,
 	}
@@ -902,37 +904,49 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 		return result
 	}
 
+	// 默认格式为 html
+	if format == "" {
+		format = "html"
+	}
+
+	// 默认图片目录
+	if imageDir == "" {
+		imageDir = "intelligent_ppt"
+	}
+
 	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
 		"status":   "processing",
 		"progress": 30,
-		"message":  "正在生成 HTML 页面...",
+		"message":  fmt.Sprintf("正在生成 %s 文件...", format),
 	})
 
 	// 确定输出路径
 	var outputPath string
 	var videoDir string
+	extension := ".html"
+	if format == "markdown" {
+		extension = ".md"
+	}
 	if videoPath != "" {
 		videoDir = filepath.Dir(videoPath)
 		baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
-		outputPath = filepath.Join(videoDir, baseName+"_bilingual.html")
+		outputPath = filepath.Join(videoDir, baseName+"_bilingual"+extension)
 	} else {
 		homeDir, _ := os.UserHomeDir()
 		videoDir = homeDir
-		outputPath = filepath.Join(homeDir, "video_bilingual.html")
+		outputPath = filepath.Join(homeDir, "video_bilingual"+extension)
 	}
 
-	// 读取 intelligent_ppt 目录下的图片
-	pptDir := filepath.Join(videoDir, "intelligent_ppt")
+	// 读取用户指定的图片目录下的图片
+	pptDir := filepath.Join(videoDir, imageDir)
 	var pptImages []PPTImageInfo
 	if _, err := os.Stat(pptDir); err == nil {
-		// 目录存在，读取图片
 		files, err := os.ReadDir(pptDir)
 		if err == nil {
 			for _, file := range files {
 				if !file.IsDir() && (strings.HasSuffix(strings.ToLower(file.Name()), ".png") ||
 					strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") ||
 					strings.HasSuffix(strings.ToLower(file.Name()), ".jpeg")) {
-					// 从文件名提取时间戳
 					timestamp := extractTimestampFromFilename(file.Name())
 					pptImages = append(pptImages, PPTImageInfo{
 						Filename:  file.Name(),
@@ -941,7 +955,6 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 					})
 				}
 			}
-			// 按时间戳排序
 			sort.Slice(pptImages, func(i, j int) bool {
 				return pptImages[i].Timestamp < pptImages[j].Timestamp
 			})
@@ -954,7 +967,7 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 		"message":  "正在聚合字幕...",
 	})
 
-	// 固定每8条字幕聚合（直接使用已翻译的字幕，不再调用LLM翻译）
+	// 固定每8条字幕聚合
 	subtitles = mergeSubtitlesBySentenceForHTML(subtitles)
 
 	runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
@@ -963,11 +976,25 @@ func (a *App) SummarizeSubtitles(subtitles []SubtitleItem, videoPath string) Sum
 		"message":  "正在写入文件...",
 	})
 
-	// 生成 HTML 内容
-	htmlContent := generateBilingualHTML(videoPath, subtitles, pptImages)
+	// 根据格式生成内容
+	var content string
+	if format == "markdown" {
+		// 定义进度回调函数
+		progressCallback := func(current, total int) {
+			progress := 80 + int(float64(current)/float64(total)*15) // 80-95% 用于翻译
+			runtime.EventsEmit(a.ctx, "summarize:progress", map[string]interface{}{
+				"status":   "processing",
+				"progress": progress,
+				"message":  fmt.Sprintf("正在翻译段落 %d/%d...", current, total),
+			})
+		}
+		content = generateBilingualMarkdown(a.ctx, videoPath, subtitles, pptImages, imageDir, progressCallback)
+	} else {
+		content = generateBilingualHTML(videoPath, subtitles, pptImages)
+	}
 
 	// 写入文件
-	if err := os.WriteFile(outputPath, []byte(htmlContent), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		result.Message = fmt.Sprintf("写入文件失败: %v", err)
 		return result
 	}
@@ -1279,4 +1306,133 @@ func generateBilingualHTML(videoPath string, subtitles []SubtitleItem, pptImages
 `)
 
 	return sb.String()
+}
+
+// generateBilingualMarkdown 生成双语字幕对照 Markdown 文档
+func generateBilingualMarkdown(ctx context.Context, videoPath string, subtitles []SubtitleItem, pptImages []PPTImageInfo, imageDir string, progressCallback func(current, total int)) string {
+	videoName := "Video Summary"
+	if videoPath != "" {
+		videoName = strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	}
+
+	var sb strings.Builder
+
+	// Markdown 头部
+	sb.WriteString(fmt.Sprintf("# %s\n\n", videoName))
+	sb.WriteString(fmt.Sprintf("生成时间: %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString("---\n\n")
+
+	// 收集所有英文句子
+	var allSentences []string
+	for _, sub := range subtitles {
+		text := strings.TrimSpace(sub.Text)
+		if text == "" {
+			continue
+		}
+		// 按句号分割句子
+		sentences := splitIntoSentences(text)
+		allSentences = append(allSentences, sentences...)
+	}
+
+	// 每10句话组成一个段落
+	const sentencesPerParagraph = 10
+	paragraphCount := 0
+	totalParagraphs := (len(allSentences) + sentencesPerParagraph - 1) / sentencesPerParagraph
+
+	for i := 0; i < len(allSentences); i += sentencesPerParagraph {
+		paragraphCount++
+		end := i + sentencesPerParagraph
+		if end > len(allSentences) {
+			end = len(allSentences)
+		}
+
+		// 合并句子成段落
+		paragraphSentences := allSentences[i:end]
+		paragraph := strings.Join(paragraphSentences, " ")
+		paragraph = strings.TrimSpace(paragraph)
+
+		if paragraph != "" {
+			sb.WriteString(fmt.Sprintf("## 段落 %d\n\n", paragraphCount))
+			sb.WriteString("**英文**: " + paragraph + "\n\n")
+
+			// 调用千问大模型翻译段落
+			translatedParagraph := translateParagraphWithQwen(ctx, paragraph)
+			if translatedParagraph != "" {
+				sb.WriteString("**中文**: " + translatedParagraph + "\n\n")
+			}
+
+			// 发送进度回调
+			if progressCallback != nil {
+				progressCallback(paragraphCount, totalParagraphs)
+			}
+		}
+	}
+
+	// Markdown 尾部
+	sb.WriteString("---\n\n")
+	sb.WriteString(fmt.Sprintf("*共 %d 个段落，%d 句话*\n", paragraphCount, len(allSentences)))
+
+	return sb.String()
+}
+
+// splitIntoSentences 将文本按句号分割成句子
+func splitIntoSentences(text string) []string {
+	// 清理文本
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return []string{}
+	}
+
+	// 按句号分割，但保留句号
+	var sentences []string
+	parts := strings.Split(text, ".")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// 添加句号回去
+		sentence := part + "."
+		sentences = append(sentences, sentence)
+	}
+
+	return sentences
+}
+
+// translateParagraphWithQwen 使用千问大模型翻译段落（使用 qwen3.5-plus 模型）
+func translateParagraphWithQwen(ctx context.Context, text string) string {
+	// 检查 API Key
+	apiKey, err := GetQwenAPIKey()
+	if err != nil {
+		fmt.Printf("[翻译段落] 未配置 API Key: %v\n", err)
+		return ""
+	}
+	_ = apiKey
+
+	// 直接使用段落文本，不需要额外的提示词包装
+	// TranslateWithQwenPlus 内部已经包含了翻译提示
+
+	// 调用千问 Plus API
+	translated, err := TranslateWithQwenPlus(ctx, text)
+	if err != nil {
+		fmt.Printf("[翻译段落] 翻译失败: %v\n", err)
+		return ""
+	}
+
+	// 清理翻译结果
+	translated = strings.TrimSpace(translated)
+
+	fmt.Printf("[翻译段落] 原文: %s -> 译文: %s\n",
+		truncateString(text, 50), truncateString(translated, 50))
+
+	return translated
+}
+
+// truncateString 截断字符串
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
